@@ -1,0 +1,523 @@
+<script>
+(function () {
+  'use strict';
+
+  // ── State ────────────────────────────────────────────────────────────
+  var state = {
+    incidents:   [],
+    onCall:      [],
+    systemHealth: {},
+    activeTab:   'CMI',
+    selectedId:  { CMI: null, EXEC_ESCALATIONS: null, OTHER_P0_P1_ESCALATIONS: null }
+  };
+
+  // ── DOM refs ─────────────────────────────────────────────────────────
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ── Init ─────────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', function () {
+    initTheme();
+    initClock();
+    initTabs();
+    initModal();
+    loadDashboard();
+  });
+
+  // ── Theme ─────────────────────────────────────────────────────────────
+  function initTheme() {
+    var saved = localStorage.getItem('iem-theme');
+    var theme = saved || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    applyTheme(theme);
+    $('themeToggleBtn').addEventListener('click', function () {
+      var current = document.body.classList.contains('theme-light') ? 'light' : 'dark';
+      applyTheme(current === 'dark' ? 'light' : 'dark');
+    });
+  }
+
+  function applyTheme(theme) {
+    document.body.classList.remove('theme-dark', 'theme-light');
+    document.body.classList.add('theme-' + theme);
+    document.body.setAttribute('data-theme', theme);
+    $('themeIconDark').style.display  = theme === 'dark'  ? '' : 'none';
+    $('themeIconLight').style.display = theme === 'light' ? '' : 'none';
+    localStorage.setItem('iem-theme', theme);
+  }
+
+  // ── Clock ─────────────────────────────────────────────────────────────
+  function initClock() {
+    function tick() {
+      var el = $('clock');
+      if (el) el.textContent = new Date().toLocaleTimeString('en-US', { hour12: false, timeZone: 'America/Los_Angeles' });
+    }
+    tick();
+    setInterval(tick, 1000);
+  }
+
+  // ── Tabs ──────────────────────────────────────────────────────────────
+  function initTabs() {
+    document.querySelectorAll('.tab').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tab = btn.dataset.tab;
+        switchTab(tab);
+      });
+    });
+  }
+
+  function switchTab(tab) {
+    state.activeTab = tab;
+    document.querySelectorAll('.tab').forEach(function (b) {
+      var active = b.dataset.tab === tab;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    document.querySelectorAll('.tab-panel').forEach(function (p) {
+      p.style.display = p.id === 'panel-' + tab ? '' : 'none';
+    });
+  }
+
+  // ── Data loading ──────────────────────────────────────────────────────
+  function loadDashboard() {
+    showLoading();
+    // google.script.run is available when served from Apps Script.
+    // Falls back to inline mock for local preview.
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(onDataLoaded)
+        .withFailureHandler(onDataError)
+        .getDashboardData();
+    } else {
+      // Local preview fallback — mirrors MockDataProvider structure
+      setTimeout(function () { onDataLoaded(getMockFallback()); }, 400);
+    }
+  }
+
+  // Expose for the Retry button
+  window.loadDashboard = loadDashboard;
+
+  function onDataLoaded(data) {
+    state.incidents    = data.incidents    || [];
+    state.onCall       = data.onCall       || [];
+    state.systemHealth = data.systemHealth || {};
+    renderAll();
+    updateFooter();
+    showDashboard();
+  }
+
+  function onDataError(err) {
+    showError(err && err.message ? err.message : 'Failed to load dashboard data.');
+  }
+
+  // ── Rendering ─────────────────────────────────────────────────────────
+  function renderAll() {
+    renderTab('CMI');
+    renderTab('EXEC_ESCALATIONS');
+    renderTab('OTHER_P0_P1_ESCALATIONS');
+    renderOnCallRoster('cmi',   state.onCall);
+    renderOnCallRoster('exec',  state.onCall);
+    renderOnCallRoster('other', state.onCall);
+  }
+
+  function renderTab(category) {
+    var incidents = state.incidents.filter(function (i) { return i.category === category; });
+    if (category === 'CMI') {
+      renderCmiBanner(incidents);
+      renderCmiTable(incidents);
+    } else if (category === 'EXEC_ESCALATIONS') {
+      renderExecTable(incidents);
+    } else {
+      renderOtherTable(incidents);
+    }
+  }
+
+  // ── CMI banner ────────────────────────────────────────────────────────
+  function renderCmiBanner(incidents) {
+    var active = incidents.find(function (i) { return i.status === 'Monitoring' || i.status === 'Investigating'; });
+    var titleEl = $('cmi-banner-title');
+    if (!titleEl) return;
+    if (active) {
+      titleEl.textContent = active.productArea + ' — ' + active.issueDetails + ' (' + active.ticketId + ')';
+    } else {
+      titleEl.textContent = 'No active CMI at this time';
+    }
+  }
+
+  // ── CMI table ─────────────────────────────────────────────────────────
+  function renderCmiTable(incidents) {
+    var tbody = $('cmi-tbody');
+    if (!tbody) return;
+    if (!incidents.length) { tbody.innerHTML = emptyRow(6); return; }
+    tbody.innerHTML = incidents.map(function (inc) {
+      return '<tr class="' + (state.selectedId.CMI === inc.id ? 'selected' : '') + '" data-id="' + esc(inc.id) + '" data-cat="CMI" tabindex="0">' +
+        '<td class="mono">' + esc(inc.ticketId) + '</td>' +
+        '<td>' + severityBadge(inc.severity) + '</td>' +
+        '<td>' + statusCell(inc.status) + '</td>' +
+        '<td class="bold">' + esc(inc.productArea) + '</td>' +
+        '<td class="loc">' + esc(inc.issueDetails) + '</td>' +
+        '<td class="text-right"><button class="btn-log" data-id="' + esc(inc.id) + '" data-ticket="' + esc(inc.ticketId) + '">OPEN LOG</button></td>' +
+      '</tr>';
+    }).join('');
+    bindTableRows(tbody, 'CMI');
+  }
+
+  // ── Exec table ────────────────────────────────────────────────────────
+  function renderExecTable(incidents) {
+    var tbody = $('exec-tbody');
+    if (!tbody) return;
+    if (!incidents.length) { tbody.innerHTML = emptyRow(7); return; }
+    tbody.innerHTML = incidents.map(function (inc) {
+      return '<tr class="' + (state.selectedId.EXEC_ESCALATIONS === inc.id ? 'selected' : '') + '" data-id="' + esc(inc.id) + '" data-cat="EXEC_ESCALATIONS" tabindex="0">' +
+        '<td class="bold">' + esc(inc.requestingPoc) + '</td>' +
+        '<td class="mono">' + esc(inc.ticketId) + '</td>' +
+        '<td>' + esc(inc.productArea) + '</td>' +
+        '<td>' + statusCell(inc.status) + '</td>' +
+        '<td class="bold">' + esc(inc.customerName) + '</td>' +
+        '<td class="loc">' + esc(inc.issueDetails) + '</td>' +
+        '<td class="text-right"><button class="btn-log" data-id="' + esc(inc.id) + '" data-ticket="' + esc(inc.ticketId) + '">OPEN LOG</button></td>' +
+      '</tr>';
+    }).join('');
+    bindTableRows(tbody, 'EXEC_ESCALATIONS');
+  }
+
+  // ── Other P0/P1 table ─────────────────────────────────────────────────
+  function renderOtherTable(incidents) {
+    var tbody = $('other-tbody');
+    if (!tbody) return;
+    if (!incidents.length) { tbody.innerHTML = emptyRow(7); return; }
+    tbody.innerHTML = incidents.map(function (inc) {
+      return '<tr class="' + (state.selectedId.OTHER_P0_P1_ESCALATIONS === inc.id ? 'selected' : '') + '" data-id="' + esc(inc.id) + '" data-cat="OTHER_P0_P1_ESCALATIONS" tabindex="0">' +
+        '<td class="bold">' + esc(inc.requestingPoc) + '</td>' +
+        '<td class="mono">' + esc(inc.ticketId) + '</td>' +
+        '<td>' + esc(inc.productArea) + '</td>' +
+        '<td>' + statusCell(inc.status) + '</td>' +
+        '<td class="bold">' + esc(inc.customerName) + '</td>' +
+        '<td class="loc">' + esc(inc.issueDetails) + '</td>' +
+        '<td class="text-right"><button class="btn-log" data-id="' + esc(inc.id) + '" data-ticket="' + esc(inc.ticketId) + '">OPEN LOG</button></td>' +
+      '</tr>';
+    }).join('');
+    bindTableRows(tbody, 'OTHER_P0_P1_ESCALATIONS');
+  }
+
+  // ── On-call roster ────────────────────────────────────────────────────
+  function renderOnCallRoster(suffix, onCall) {
+    var el = $('oncall-roster-' + suffix);
+    if (!el) return;
+    if (!onCall.length) { el.innerHTML = '<p style="padding:12px;color:var(--text-faint);font-size:0.72rem;">No on-call data.</p>'; return; }
+    el.innerHTML = onCall.map(function (person) {
+      return '<div class="oncall-card" tabindex="0" role="button" aria-label="Contact ' + esc(person.name) + '" data-name="' + esc(person.name) + '" data-role="' + esc(person.role) + '">' +
+        '<div class="oncall-info">' +
+          '<span class="oncall-name">' + esc(person.name) + '</span>' +
+          '<span class="oncall-role">' + esc(person.role) + '</span>' +
+        '</div>' +
+        '<div class="oncall-action">' +
+          '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.89 9.11a19.79 19.79 0 01-3.07-8.67A2 2 0 012.8 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L7.09 9.91a16 16 0 006 6l.96-.96a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 17z"/></svg>' +
+          'Contact' +
+        '</div>' +
+      '</div>';
+    }).join('');
+    el.querySelectorAll('.oncall-card').forEach(function (card) {
+      card.addEventListener('click', onContactClick);
+      card.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onContactClick.call(card); } });
+    });
+  }
+
+  function onContactClick() {
+    var name = this.dataset.name;
+    var role = this.dataset.role;
+    showToast('Contact initiated with ' + name + ' (' + role + ')');
+  }
+
+  // ── Table row interaction ─────────────────────────────────────────────
+  function bindTableRows(tbody, category) {
+    tbody.querySelectorAll('tr[data-id]').forEach(function (row) {
+      row.addEventListener('click', function (e) {
+        if (e.target.classList.contains('btn-log')) return; // let button handle it
+        selectIncident(row.dataset.id, category);
+      });
+      row.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') selectIncident(row.dataset.id, category);
+      });
+    });
+    tbody.querySelectorAll('.btn-log').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openLogModal(btn.dataset.id, btn.dataset.ticket);
+      });
+    });
+  }
+
+  function selectIncident(id, category) {
+    state.selectedId[category] = id;
+    // Re-highlight rows
+    var panelMap = { CMI: 'cmi', EXEC_ESCALATIONS: 'exec', OTHER_P0_P1_ESCALATIONS: 'other' };
+    var suffix = panelMap[category];
+    var tbodyId = suffix + '-tbody';
+    var tbody = $(tbodyId);
+    if (tbody) {
+      tbody.querySelectorAll('tr[data-id]').forEach(function (r) {
+        r.classList.toggle('selected', r.dataset.id === id);
+      });
+    }
+    // Show comms panel inline
+    if (category === 'CMI') renderInlineComms('cmi-comms-panel', id, category);
+    else if (category === 'EXEC_ESCALATIONS') renderInlineComms('exec-comms-panel', id, category);
+    else renderInlineComms('other-comms-panel', id, category);
+
+    // Show impacted customers for CMI
+    if (category === 'CMI') renderCustomersPanel(id);
+  }
+
+  // ── Inline comms (below table) ────────────────────────────────────────
+  function renderInlineComms(panelId, incidentId, category) {
+    var panel = $(panelId);
+    if (!panel) return;
+    var inc = state.incidents.find(function (i) { return i.id === incidentId; });
+    if (!inc) return;
+
+    // Show skeleton immediately
+    panel.innerHTML = '<div class="comms-panel"><div class="comms-panel-header"><div class="comms-dot"></div><span class="section-label">Latest Comms Blast — ' + esc(inc.ticketId) + '</span></div><div class="comms-panel-body"><div class="state-panel compact"><div class="spinner"></div><p>Loading log…</p></div></div></div>';
+
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (logs) { renderInlineLog(panelId, inc, logs); })
+        .withFailureHandler(function () { renderInlineLog(panelId, inc, []); })
+        .getCommunicationLog(incidentId);
+    } else {
+      var fallback = getMockFallback();
+      var logs = (fallback.commsLog || []).filter(function (l) { return l.incidentId === incidentId; });
+      setTimeout(function () { renderInlineLog(panelId, inc, logs); }, 300);
+    }
+  }
+
+  function renderInlineLog(panelId, inc, logs) {
+    var panel = $(panelId);
+    if (!panel) return;
+    var latest = logs.length ? logs[logs.length - 1] : null;
+    var historyRows = logs.slice().reverse().map(function (l, i) {
+      return '<tr><td class="ts">' + formatTs(l.timestamp) + '</td><td class="text-uppercase">' + (i === logs.length - 1 ? 'Initial Update' : 'Update #' + (logs.length - 1 - i)) + '</td><td>' + esc(l.author) + '</td></tr>';
+    }).join('');
+
+    panel.innerHTML = '<div class="comms-panel">' +
+      '<div class="comms-panel-header"><div class="comms-dot"></div><span class="section-label">Latest Comms Blast — ' + esc(inc.ticketId) + '</span></div>' +
+      '<div class="comms-panel-body">' +
+        '<div class="comms-message-box"><p class="comms-message-text">' + esc(latest ? latest.message : 'No communications logged yet.') + '</p></div>' +
+        '<div class="comms-meta">' +
+          '<div style="display:flex;gap:16px"><span>' + (latest ? 'Sent ' + timeAgo(latest.timestamp) : '—') + '</span><span>BY: ' + esc(latest ? latest.author : '—') + '</span></div>' +
+          '<button class="btn-log" onclick="copyCommsText(\'' + esc(latest ? latest.message : '') + '\')">Copy Text</button>' +
+        '</div>' +
+        (logs.length ? '<div class="comms-history-title">History of Comms</div><table class="comms-history-table"><thead><tr><th>Timestamp</th><th>Type</th><th>IEM POC</th></tr></thead><tbody>' + historyRows + '</tbody></table>' : '') +
+      '</div>' +
+    '</div>';
+  }
+
+  window.copyCommsText = function (text) {
+    if (navigator.clipboard) { navigator.clipboard.writeText(text); }
+    showToast('Copied to clipboard.');
+  };
+
+  // ── Impacted customers panel (CMI sidebar) ────────────────────────────
+  function renderCustomersPanel(incidentId) {
+    var el = $('cmi-customers-panel');
+    if (!el) return;
+    var inc = state.incidents.find(function (i) { return i.id === incidentId; });
+    if (!inc) return;
+    var customers = inc.customerName ? [inc.customerName] : [];
+    el.innerHTML = '<div class="customers-panel card">' +
+      '<div class="card-header"><span class="section-label">Top Strategic Impacted Customers</span></div>' +
+      '<div class="customers-list">' +
+        (customers.length ? customers.map(function (c, i) {
+          return '<div class="customer-item"><div class="customer-rank">' + String(i + 1).padStart(2, '0') + '</div><span class="customer-name">' + esc(c) + '</span></div>';
+        }).join('') : '<p style="color:var(--text-faint);font-size:0.72rem;font-style:italic;padding:8px 0">No high-priority customers flagged.</p>') +
+      '</div>' +
+      '<div class="customers-actions">' +
+        '<a href="http://go/ocm-panic" target="_blank" rel="noopener noreferrer" class="btn-primary" style="text-align:center">Social Inbound Cases</a>' +
+        '<button class="btn-outline" style="width:100%;text-align:center">Execute Response Plan</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // ── Log Modal ─────────────────────────────────────────────────────────
+  function initModal() {
+    $('modalCloseBtn').addEventListener('click', closeModal);
+    $('logModalBackdrop').addEventListener('click', function (e) {
+      if (e.target === this) closeModal();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeModal();
+    });
+  }
+
+  function openLogModal(incidentId, ticketId) {
+    var backdrop = $('logModalBackdrop');
+    $('modalTitle').textContent = 'Comms Log — ' + ticketId;
+    $('modalLoading').style.display = '';
+    $('modalError').style.display   = 'none';
+    $('modalLog').style.display     = 'none';
+    backdrop.style.display = 'flex';
+    backdrop.setAttribute('aria-hidden', 'false');
+    $('modalCloseBtn').focus();
+
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (logs) { renderModalLog(logs); })
+        .withFailureHandler(function (err) { showModalError(err); })
+        .getCommunicationLog(incidentId);
+    } else {
+      var fallback = getMockFallback();
+      var logs = (fallback.commsLog || []).filter(function (l) { return l.incidentId === incidentId; });
+      setTimeout(function () { renderModalLog(logs); }, 400);
+    }
+  }
+
+  function renderModalLog(logs) {
+    $('modalLoading').style.display = 'none';
+    var container = $('modalLog');
+    if (!logs.length) {
+      container.innerHTML = '<p style="color:var(--text-faint);font-size:0.75rem;font-style:italic;padding:16px 0;text-align:center">No communications logged for this incident.</p>';
+    } else {
+      container.innerHTML = logs.slice().reverse().map(function (l) {
+        return '<div class="log-entry">' +
+          '<div class="log-entry-header">' +
+            '<span class="log-author">' + esc(l.author) + '</span>' +
+            '<span class="log-ts">' + formatTs(l.timestamp) + '</span>' +
+            '<span class="log-audience">' + esc(l.audience) + '</span>' +
+          '</div>' +
+          '<p class="log-message">' + esc(l.message) + '</p>' +
+        '</div>';
+      }).join('');
+    }
+    container.style.display = '';
+  }
+
+  function showModalError(err) {
+    $('modalLoading').style.display = 'none';
+    $('modalErrorMsg').textContent = err && err.message ? err.message : 'Failed to load log.';
+    $('modalError').style.display = '';
+  }
+
+  function closeModal() {
+    var backdrop = $('logModalBackdrop');
+    backdrop.style.display = 'none';
+    backdrop.setAttribute('aria-hidden', 'true');
+  }
+
+  // ── Footer ────────────────────────────────────────────────────────────
+  function updateFooter() {
+    var h = state.systemHealth;
+    if (!h) return;
+    var left  = $('footer-left');
+    var right = $('footer-right');
+    if (left && h.version)         left.textContent  = h.version + ' | AUTHENTICATED: ' + h.authenticatedAs;
+    if (right && h.apiLatency)     right.innerHTML   = 'API: ' + h.apiLatency + ' | <span class="uptime">UPTIME: ' + h.uptime + '</span> | LOG: ' + h.logRate;
+  }
+
+  // ── Visibility helpers ────────────────────────────────────────────────
+  function showLoading() {
+    $('loadingState').style.display    = '';
+    $('errorState').style.display      = 'none';
+    $('dashboardContent').style.display= 'none';
+  }
+  function showDashboard() {
+    $('loadingState').style.display    = 'none';
+    $('errorState').style.display      = 'none';
+    $('dashboardContent').style.display= '';
+    switchTab('CMI');
+  }
+  function showError(msg) {
+    $('loadingState').style.display    = 'none';
+    $('errorState').style.display      = '';
+    $('dashboardContent').style.display= 'none';
+    $('errorMsg').textContent = msg;
+  }
+
+  // ── Toast ─────────────────────────────────────────────────────────────
+  function showToast(msg) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.style.display = '';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function () { t.style.display = 'none'; }, 2800);
+  }
+
+  // ── Template helpers ──────────────────────────────────────────────────
+  function esc(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function emptyRow(cols) {
+    return '<tr class="empty-row"><td colspan="' + cols + '">No incidents found.</td></tr>';
+  }
+
+  function severityBadge(sev) {
+    var s = String(sev || '').toLowerCase();
+    var cls = s === 'huge' ? 'badge-sev-huge' : s === 'p0' ? 'badge-sev-p0' : s === 'major' ? 'badge-sev-major' : s === 'p1' ? 'badge-sev-p1' : 'badge-sev-other';
+    return '<span class="badge ' + cls + '">' + esc(sev) + '</span>';
+  }
+
+  function statusCell(status) {
+    var s = String(status || '').toLowerCase();
+    var dotCls = s === 'monitoring' ? 'pulse-dot' : s === 'investigating' ? 'pulse-dot red' : s === 'customer update pending' ? 'pulse-dot amber' : 'pulse-dot static';
+    return '<div class="status-cell"><span class="' + dotCls + '" aria-hidden="true"></span>' + esc(status) + '</div>';
+  }
+
+  function formatTs(isoStr) {
+    if (!isoStr) return '—';
+    try {
+      var d = new Date(isoStr);
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+             d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    } catch (e) { return isoStr; }
+  }
+
+  function timeAgo(isoStr) {
+    if (!isoStr) return '—';
+    var diff = Math.floor((Date.now() - new Date(isoStr).getTime()) / 60000);
+    if (diff < 1)  return 'just now';
+    if (diff < 60) return diff + 'm ago';
+    var h = Math.floor(diff / 60);
+    return h + 'h ' + (diff % 60) + 'm ago';
+  }
+
+  // ── Local preview mock fallback ───────────────────────────────────────
+  // Mirrors the MockDataProvider structure so the UI works without Apps Script.
+  function getMockFallback() {
+    var now = Date.now();
+    function ago(h) { return new Date(now - h * 3600000).toISOString(); }
+    var incidents = [
+      { id:'inc-001', category:'CMI',                    requestingPoc:'Bhushan K',  ticketId:'OMG/2345', productArea:'Compute',   severity:'Huge',  status:'Monitoring',              customerName:'VPC',         issueDetails:'GLOBAL',          createdAt:ago(2),  updatedAt:ago(1)  },
+      { id:'inc-002', category:'CMI',                    requestingPoc:'Saurabh M',  ticketId:'OMG/2346', productArea:'Networking', severity:'Major', status:'Investigating',            customerName:'Interconnect',issueDetails:'US-EAST4',        createdAt:ago(28), updatedAt:ago(3)  },
+      { id:'inc-003', category:'CMI',                    requestingPoc:'Aminisha R', ticketId:'OMG/2341', productArea:'Storage',    severity:'P0',    status:'Fixed',                   customerName:'GCS',         issueDetails:'EU-WEST1',        createdAt:ago(78), updatedAt:ago(50) },
+      { id:'inc-004', category:'CMI',                    requestingPoc:'Likitha K',  ticketId:'OMG/2338', productArea:'Databases',  severity:'P1',    status:'Closed',                  customerName:'Cloud SQL',   issueDetails:'ASIA-SE1',        createdAt:ago(128),updatedAt:ago(100)},
+      { id:'inc-005', category:'EXEC_ESCALATIONS',       requestingPoc:'Bhushan K',  ticketId:'OMG/2345', productArea:'Compute',   severity:'Huge',  status:'Monitoring',              customerName:'VPC',         issueDetails:'GLOBAL',          createdAt:ago(2),  updatedAt:ago(1)  },
+      { id:'inc-006', category:'EXEC_ESCALATIONS',       requestingPoc:'Pravil S',   ticketId:'OMG/2350', productArea:'BigQuery',  severity:'P0',    status:'Customer Update Pending', customerName:'FinanceCo',   issueDetails:'US-CENTRAL1',     createdAt:ago(29), updatedAt:ago(2)  },
+      { id:'inc-007', category:'EXEC_ESCALATIONS',       requestingPoc:'Pnmuley G',  ticketId:'OMG/2347', productArea:'GKE',       severity:'Huge',  status:'Investigating',           customerName:'RetailMax',   issueDetails:'EU-WEST2',        createdAt:ago(51), updatedAt:ago(25) },
+      { id:'inc-008', category:'EXEC_ESCALATIONS',       requestingPoc:'Benson A',   ticketId:'OMG/2340', productArea:'Pub/Sub',   severity:'P1',    status:'Fixed',                   customerName:'StreamCorp',  issueDetails:'US-WEST1',        createdAt:ago(103),updatedAt:ago(74) },
+      { id:'inc-009', category:'OTHER_P0_P1_ESCALATIONS',requestingPoc:'Saurabh M',  ticketId:'OMG/2352', productArea:'App Engine',severity:'P0',    status:'Investigating',           customerName:'HealthTech',  issueDetails:'US-EAST1',        createdAt:ago(1),  updatedAt:ago(0)  },
+      { id:'inc-010', category:'OTHER_P0_P1_ESCALATIONS',requestingPoc:'Likitha K',  ticketId:'OMG/2349', productArea:'Cloud Run', severity:'P1',    status:'Monitoring',              customerName:'LogiCo',      issueDetails:'ASIA-EAST1',      createdAt:ago(27), updatedAt:ago(4)  },
+      { id:'inc-011', category:'OTHER_P0_P1_ESCALATIONS',requestingPoc:'Aminisha R', ticketId:'OMG/2344', productArea:'Spanner',   severity:'P0',    status:'Closed',                  customerName:'BankGroup',   issueDetails:'US-CENTRAL1',     createdAt:ago(153),updatedAt:ago(122)}
+    ];
+    var onCall = [
+      { id:'oc-001', role:'IEM ONCALL',      name:'pravil',  contactMethod:'phone', status:'available', timezone:'US/Pacific' },
+      { id:'oc-002', role:'IEM CMIC ONCALL', name:'pnmuley', contactMethod:'phone', status:'available', timezone:'US/Pacific' }
+    ];
+    var commsLog = [
+      { id:'log-001', incidentId:'inc-001', timestamp:ago(2),   author:'system-bot',   message:'Incident opened. Initial triage in progress.', audience:'IEM' },
+      { id:'log-002', incidentId:'inc-001', timestamp:ago(1.5), author:'IEM Desk',     message:'Executive comms bridge opened. VP Engineering notified.', audience:'Executive' },
+      { id:'log-003', incidentId:'inc-001', timestamp:ago(1),   author:'MIM-ADMIN-01', message:'Latency spike traced to misconfigured VPC peering route. Rollback initiated.', audience:'IEM' },
+      { id:'log-004', incidentId:'inc-001', timestamp:ago(0.5), author:'MIM-ADMIN-01', message:'Rollback 80% complete. Latency returning to baseline. Monitoring for full recovery.', audience:'Executive' },
+      { id:'log-005', incidentId:'inc-005', timestamp:ago(2),   author:'system-bot',   message:'Incident opened. Initial triage in progress.', audience:'IEM' },
+      { id:'log-006', incidentId:'inc-005', timestamp:ago(1),   author:'IEM Desk',     message:'Executive bridge live. CTO looped in via exec comms channel.', audience:'Executive' },
+      { id:'log-007', incidentId:'inc-005', timestamp:ago(0.5), author:'MIM-ADMIN-01', message:'Mitigation 80% complete. Monitoring.', audience:'Executive' },
+      { id:'log-008', incidentId:'inc-006', timestamp:ago(29),  author:'system-bot',   message:'BigQuery query failure rate elevated above SLO threshold.', audience:'IEM' },
+      { id:'log-009', incidentId:'inc-006', timestamp:ago(27),  author:'IEM Desk',     message:'Exec notified. Customer FinanceCo CSM engaged for update.', audience:'Customer' },
+      { id:'log-010', incidentId:'inc-009', timestamp:ago(1),   author:'system-bot',   message:'App Engine deploy failure affecting us-east1. Auto-rollback triggered.', audience:'IEM' }
+    ];
+    return {
+      incidents: incidents,
+      onCall: onCall,
+      commsLog: commsLog,
+      systemHealth: { version:'v4.2.1-RELEASE', authenticatedAs:'MIM-ADMIN-01', apiLatency:'12MS', uptime:'99.98%', logRate:'12.4K/S' }
+    };
+  }
+
+})();
+</script>

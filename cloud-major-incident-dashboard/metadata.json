@@ -1,0 +1,6 @@
+{
+  "name": "Cloud Major Incident Dashboard",
+  "description": "A high-precision dashboard for Major Incident and escalation management, featuring real-time monitoring and resource tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
