@@ -17,5 +17,9 @@ var INCIDENT_CONFIG = {
   // External API (used when DATA_SOURCE = 'api')
   API_BASE_URL: '',
   // Store the actual key in Script Properties under this name
-  API_KEY_PROPERTY_NAME: 'INCIDENT_API_KEY'
+  API_KEY_PROPERTY_NAME: 'INCIDENT_API_KEY',
+
+  // Google Drive file ID for the IEM Team logo image (PNG/JPG)
+  // Leave empty to show the text fallback "IEM"
+  LOGO_FILE_ID: ''
 };

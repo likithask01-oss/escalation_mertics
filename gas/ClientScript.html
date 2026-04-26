@@ -6,12 +6,16 @@
   var $ = function (id) { return document.getElementById(id); };
 
   // ── App state ─────────────────────────────────────────────────────────
-  var activeTabId     = 'EXEC_ESCALATIONS';
-  var activePeriod    = '3M';
-  var chartInstance   = null;
-  var analyticsInited = false;
-  var selectedRowId   = null;
-  var ageIntervalId   = null;
+  var activeTabId       = 'EXEC_ESCALATIONS';
+  var activePeriod      = '3M';
+  var chartInstance     = null;
+  var analyticsInited   = false;
+  var selectedRowId     = null;
+  var ageIntervalId     = null;
+  var currentPage       = 1;
+  var PAGE_SIZE         = 10;
+  var colFilters        = { requestingPoc:'', ticketId:'', productArea:'', status:'', customerName:'', fmr:'', age:'' };
+  var commsPanelCleanup = null;
 
   // ── Tab registry ──────────────────────────────────────────────────────
   var TABS = [
@@ -21,6 +25,15 @@
     { id: 'GUP_ESCALATION',         label: 'gUP Escalation',         kpi: 'KR5', chartTitle: 'gUP Esc — First Meaningful Update',      rawTitle: 'gUP Escalations RawData' },
     { id: 'BILLING_ESCALATION',     label: 'Billing Escalation',     kpi: 'KR6', chartTitle: 'Billing Esc — First Meaningful Update',  rawTitle: 'Billing Escalations RawData' },
     { id: 'SOCIAL_CARE_ESCALATION', label: 'Social Care Escalation', kpi: 'KR7', chartTitle: 'Social Care — First Meaningful Update',  rawTitle: 'Social Care RawData' }
+  ];
+
+  // ── Mock notifications ────────────────────────────────────────────────
+  var MOCK_NOTIFICATIONS = [
+    { id:'n1', read:false, bugId:'b/503823401', title:'New EXEC Escalation: OMG/2351',  body:'VPC connectivity issue — FinanceCo (Platinum)',         ts: new Date(Date.now() -   300000).toISOString() },
+    { id:'n2', read:false, bugId:'b/503790123', title:'P0 Alert: GKE Cluster Failure',   body:'RetailMax Enterprise cluster down in us-central1',       ts: new Date(Date.now() -   900000).toISOString() },
+    { id:'n3', read:true,  bugId:'b/503750456', title:'Resolved: OMG/2347 → Fixed',      body:'GKE issue mitigated, monitoring for full recurrence',    ts: new Date(Date.now() -  3600000).toISOString() },
+    { id:'n4', read:true,  bugId:'b/503710789', title:'New MCS Escalation: MCS/4522',    body:'Network degradation affecting TelcoGiant (Platinum)',    ts: new Date(Date.now() -  7200000).toISOString() },
+    { id:'n5', read:true,  bugId:'b/503680234', title:'SLO Breach: Billing — Apr 2026',  body:'Billing Esc SLO dropped below 70% threshold this month', ts: new Date(Date.now() - 14400000).toISOString() }
   ];
 
   // ── Escalation age (live-computed, never hardcoded) ───────────────────
@@ -46,6 +59,26 @@
     if (m <= 5)  return 'fmr-good';
     if (m <= 15) return 'fmr-warn';
     return 'fmr-bad';
+  }
+
+  // ── useClickOutside — vanilla-JS equivalent of the React hook ─────────
+  // Calls `callback` when any click lands outside every element in `els`.
+  // Returns a cleanup function that removes the listener immediately.
+  function useClickOutside(els, callback) {
+    function handler(e) {
+      var outside = els.every(function (el) { return el && !el.contains(e.target); });
+      if (outside) {
+        callback();
+        document.removeEventListener('click', handler, true);
+      }
+    }
+    // Delay one tick so the click that triggered the open doesn't instantly close.
+    setTimeout(function () {
+      document.addEventListener('click', handler, true);
+    }, 0);
+    return function cleanup() {
+      document.removeEventListener('click', handler, true);
+    };
   }
 
   // ── Mock incident data (6 tabs) ───────────────────────────────────────
@@ -142,56 +175,55 @@
   var MOCK_RAW = {
     EXEC_ESCALATIONS: [
       {month:'2026-04',bugId:'b/503022341',escalation:'70236829',subject:'Email – Fwd: Executive Complaint',            created:'2026-04-15 12:36',firstAssign:'2026-04-15 12:41:45',firstUpdate:'2026-04-15 12:47:30'},
-      {month:'2026-04',bugId:'b/502987654',escalation:'70198432',subject:'Email – Executive Escalation – VPC Outage', created:'2026-04-12 09:15',firstAssign:'2026-04-12 09:22:10',firstUpdate:'2026-04-12 09:33:55'},
-      {month:'2026-03',bugId:'b/501234567',escalation:'69876543',subject:'Email – Fwd: Critical Service Degradation',    created:'2026-03-28 14:22',firstAssign:'2026-03-28 14:31:07',firstUpdate:'2026-03-28 14:42:19'},
-      {month:'2026-03',bugId:'b/500876543',escalation:'69654321',subject:'Email – Executive Alert – BigQuery Failure',created:'2026-03-15 11:05',firstAssign:'2026-03-15 11:12:44',firstUpdate:'2026-03-15 11:24:08'},
-      {month:'2026-02',bugId:'b/499654321',escalation:'68765432',subject:'Email – CEO Escalation – Cloud Run',      created:'2026-02-22 16:47',firstAssign:'2026-02-22 17:01:23',firstUpdate:'2026-02-22 17:14:37'},
+      {month:'2026-04',bugId:'b/502987654',escalation:'70198432',subject:'Email – Executive Escalation – VPC Outage',   created:'2026-04-12 09:15',firstAssign:'2026-04-12 09:22:10',firstUpdate:'2026-04-12 09:33:55'},
+      {month:'2026-03',bugId:'b/501234567',escalation:'69876543',subject:'Email – Fwd: Critical Service Degradation',   created:'2026-03-28 14:22',firstAssign:'2026-03-28 14:31:07',firstUpdate:'2026-03-28 14:42:19'},
+      {month:'2026-03',bugId:'b/500876543',escalation:'69654321',subject:'Email – Executive Alert – BigQuery Failure',  created:'2026-03-15 11:05',firstAssign:'2026-03-15 11:12:44',firstUpdate:'2026-03-15 11:24:08'},
+      {month:'2026-02',bugId:'b/499654321',escalation:'68765432',subject:'Email – CEO Escalation – Cloud Run',          created:'2026-02-22 16:47',firstAssign:'2026-02-22 17:01:23',firstUpdate:'2026-02-22 17:14:37'},
       {month:'2026-01',bugId:'b/497654321',escalation:'67654321',subject:'Email – Board Level Escalation',              created:'2026-01-18 13:27',firstAssign:'2026-01-18 13:38:52',firstUpdate:'2026-01-18 13:52:11'},
-      {month:'2025-12',bugId:'b/495432109',escalation:'66543210',subject:'Email – Fwd: Critical – Pub/Sub Delay',  created:'2025-12-20 15:52',firstAssign:'2025-12-20 16:03:41',firstUpdate:'2025-12-20 16:17:05'}
+      {month:'2025-12',bugId:'b/495432109',escalation:'66543210',subject:'Email – Fwd: Critical – Pub/Sub Delay',       created:'2025-12-20 15:52',firstAssign:'2025-12-20 16:03:41',firstUpdate:'2025-12-20 16:17:05'}
     ],
     P0_P1_ESCALATION: [
-      {month:'2026-04',bugId:'b/503156789',escalation:'70312456',subject:'CUF – Social Care – N/A',               created:'2026-04-18 10:22',firstAssign:'2026-04-18 10:35:12',firstUpdate:'2026-04-18 10:47:30'},
-      {month:'2026-04',bugId:'b/502876543',escalation:'70087654',subject:'P0 – Compute – Global Impact',           created:'2026-04-10 07:45',firstAssign:'2026-04-10 07:51:23',firstUpdate:'2026-04-10 08:05:44'},
-      {month:'2026-03',bugId:'b/501567890',escalation:'69923456',subject:'CUF – Enterprise – Critical Outage',     created:'2026-03-25 13:18',firstAssign:'2026-03-25 13:24:51',firstUpdate:'2026-03-25 13:41:22'},
-      {month:'2026-03',bugId:'b/500345678',escalation:'69701234',subject:'P0 – Networking – EU-WEST1',             created:'2026-03-12 09:33',firstAssign:'2026-03-12 09:39:07',firstUpdate:'2026-03-12 09:52:15'},
-      {month:'2026-02',bugId:'b/499123456',escalation:'68890123',subject:'CUF – Social – Executive Request',       created:'2026-02-27 16:05',firstAssign:'2026-02-27 16:12:44',firstUpdate:'2026-02-27 16:28:33'},
-      {month:'2026-01',bugId:'b/497345678',escalation:'67789012',subject:'CUF – Platinum – Global Incident',       created:'2026-01-22 08:29',firstAssign:'2026-01-22 08:36:54',firstUpdate:'2026-01-22 08:51:40'},
-      {month:'2025-12',bugId:'b/495567890',escalation:'66678901',subject:'CUF – Enterprise – Storage Failure',     created:'2025-12-19 12:38',firstAssign:'2025-12-19 12:44:17',firstUpdate:'2025-12-19 12:59:43'}
+      {month:'2026-04',bugId:'b/503156789',escalation:'70312456',subject:'CUF – Social Care – N/A',                     created:'2026-04-18 10:22',firstAssign:'2026-04-18 10:35:12',firstUpdate:'2026-04-18 10:47:30'},
+      {month:'2026-04',bugId:'b/502876543',escalation:'70087654',subject:'P0 – Compute – Global Impact',                created:'2026-04-10 07:45',firstAssign:'2026-04-10 07:51:23',firstUpdate:'2026-04-10 08:05:44'},
+      {month:'2026-03',bugId:'b/501567890',escalation:'69923456',subject:'CUF – Enterprise – Critical Outage',          created:'2026-03-25 13:18',firstAssign:'2026-03-25 13:24:51',firstUpdate:'2026-03-25 13:41:22'},
+      {month:'2026-03',bugId:'b/500345678',escalation:'69701234',subject:'P0 – Networking – EU-WEST1',                  created:'2026-03-12 09:33',firstAssign:'2026-03-12 09:39:07',firstUpdate:'2026-03-12 09:52:15'},
+      {month:'2026-02',bugId:'b/499123456',escalation:'68890123',subject:'CUF – Social – Executive Request',            created:'2026-02-27 16:05',firstAssign:'2026-02-27 16:12:44',firstUpdate:'2026-02-27 16:28:33'},
+      {month:'2026-01',bugId:'b/497345678',escalation:'67789012',subject:'CUF – Platinum – Global Incident',            created:'2026-01-22 08:29',firstAssign:'2026-01-22 08:36:54',firstUpdate:'2026-01-22 08:51:40'},
+      {month:'2025-12',bugId:'b/495567890',escalation:'66678901',subject:'CUF – Enterprise – Storage Failure',          created:'2025-12-19 12:38',firstAssign:'2025-12-19 12:44:17',firstUpdate:'2025-12-19 12:59:43'}
     ],
     MCS: [
-      {month:'2026-04',bugId:'b/503290123',escalation:'70401234',subject:'MCS – Network Degradation – TelcoGiant', created:'2026-04-20 09:11',firstAssign:'2026-04-20 09:18:33',firstUpdate:'2026-04-20 09:29:45'},
-      {month:'2026-04',bugId:'b/503045678',escalation:'70267890',subject:'MCS – Storage Latency Spike',                created:'2026-04-08 14:37',firstAssign:'2026-04-08 14:49:02',firstUpdate:'2026-04-08 15:03:18'},
-      {month:'2026-03',bugId:'b/501789012',escalation:'70012345',subject:'MCS – IAM Access Revocation Issue',          created:'2026-03-19 11:24',firstAssign:'2026-03-19 11:35:44',firstUpdate:'2026-03-19 11:48:12'},
-      {month:'2026-02',bugId:'b/499456789',escalation:'68901234',subject:'MCS – VPC Connectivity Failure',             created:'2026-02-15 08:52',firstAssign:'2026-02-15 09:04:17',firstUpdate:'2026-02-15 09:19:33'},
-      {month:'2026-01',bugId:'b/497901234',escalation:'67890123',subject:'MCS – Compute Quota Exceeded',               created:'2026-01-29 13:08',firstAssign:'2026-01-29 13:19:41',firstUpdate:'2026-01-29 13:32:07'},
-      {month:'2025-12',bugId:'b/495678901',escalation:'66789012',subject:'MCS – Kubernetes Node Failure',              created:'2025-12-11 10:33',firstAssign:'2025-12-11 10:44:22',firstUpdate:'2025-12-11 10:57:48'}
+      {month:'2026-04',bugId:'b/503290123',escalation:'70401234',subject:'MCS – Network Degradation – TelcoGiant',      created:'2026-04-20 09:11',firstAssign:'2026-04-20 09:18:33',firstUpdate:'2026-04-20 09:29:45'},
+      {month:'2026-04',bugId:'b/503045678',escalation:'70267890',subject:'MCS – Storage Latency Spike',                 created:'2026-04-08 14:37',firstAssign:'2026-04-08 14:49:02',firstUpdate:'2026-04-08 15:03:18'},
+      {month:'2026-03',bugId:'b/501789012',escalation:'70012345',subject:'MCS – IAM Access Revocation Issue',           created:'2026-03-19 11:24',firstAssign:'2026-03-19 11:35:44',firstUpdate:'2026-03-19 11:48:12'},
+      {month:'2026-02',bugId:'b/499456789',escalation:'68901234',subject:'MCS – VPC Connectivity Failure',              created:'2026-02-15 08:52',firstAssign:'2026-02-15 09:04:17',firstUpdate:'2026-02-15 09:19:33'},
+      {month:'2026-01',bugId:'b/497901234',escalation:'67890123',subject:'MCS – Compute Quota Exceeded',                created:'2026-01-29 13:08',firstAssign:'2026-01-29 13:19:41',firstUpdate:'2026-01-29 13:32:07'},
+      {month:'2025-12',bugId:'b/495678901',escalation:'66789012',subject:'MCS – Kubernetes Node Failure',               created:'2025-12-11 10:33',firstAssign:'2025-12-11 10:44:22',firstUpdate:'2025-12-11 10:57:48'}
     ],
     GUP_ESCALATION: [
-      {month:'2026-04',bugId:'b/503401234',escalation:'70523456',subject:'gUP – Workspace Login Failure – EduOrg', created:'2026-04-22 08:15',firstAssign:'2026-04-22 08:21:30',firstUpdate:'2026-04-22 08:34:12'},
-      {month:'2026-04',bugId:'b/503167890',escalation:'70389012',subject:'gUP – Drive Sync Failure – MediaHouse', created:'2026-04-11 13:42',firstAssign:'2026-04-11 13:53:17',firstUpdate:'2026-04-11 14:07:44'},
-      {month:'2026-03',bugId:'b/501890123',escalation:'70123456',subject:'gUP – Meet Connectivity – CorpX',        created:'2026-03-21 10:19',firstAssign:'2026-03-21 10:29:55',firstUpdate:'2026-03-21 10:43:21'},
-      {month:'2026-02',bugId:'b/499567890',escalation:'68901234',subject:'gUP – Workspace Outage – EduOrg',        created:'2026-02-18 15:33',firstAssign:'2026-02-18 15:43:12',firstUpdate:'2026-02-18 15:57:38'},
-      {month:'2026-01',bugId:'b/498012345',escalation:'67901234',subject:'gUP – Drive Storage Quota – MediaHouse', created:'2026-01-13 11:47',firstAssign:'2026-01-13 12:00:03',firstUpdate:'2026-01-13 12:15:29'},
-      {month:'2025-12',bugId:'b/495789012',escalation:'66890123',subject:'gUP – Google Chat Outage',                   created:'2025-12-16 09:22',firstAssign:'2025-12-16 09:31:47',firstUpdate:'2025-12-16 09:45:13'}
+      {month:'2026-04',bugId:'b/503401234',escalation:'70523456',subject:'gUP – Workspace Login Failure – EduOrg',      created:'2026-04-22 08:15',firstAssign:'2026-04-22 08:21:30',firstUpdate:'2026-04-22 08:34:12'},
+      {month:'2026-04',bugId:'b/503167890',escalation:'70389012',subject:'gUP – Drive Sync Failure – MediaHouse',       created:'2026-04-11 13:42',firstAssign:'2026-04-11 13:53:17',firstUpdate:'2026-04-11 14:07:44'},
+      {month:'2026-03',bugId:'b/501890123',escalation:'70123456',subject:'gUP – Meet Connectivity – CorpX',             created:'2026-03-21 10:19',firstAssign:'2026-03-21 10:29:55',firstUpdate:'2026-03-21 10:43:21'},
+      {month:'2026-02',bugId:'b/499567890',escalation:'68901234',subject:'gUP – Workspace Outage – EduOrg',             created:'2026-02-18 15:33',firstAssign:'2026-02-18 15:43:12',firstUpdate:'2026-02-18 15:57:38'},
+      {month:'2026-01',bugId:'b/498012345',escalation:'67901234',subject:'gUP – Drive Storage Quota – MediaHouse',      created:'2026-01-13 11:47',firstAssign:'2026-01-13 12:00:03',firstUpdate:'2026-01-13 12:15:29'},
+      {month:'2025-12',bugId:'b/495789012',escalation:'66890123',subject:'gUP – Google Chat Outage',                    created:'2025-12-16 09:22',firstAssign:'2025-12-16 09:31:47',firstUpdate:'2025-12-16 09:45:13'}
     ],
     BILLING_ESCALATION: [
-      {month:'2026-04',bugId:'b/503512345',escalation:'70634567',subject:'Billing – Invoice Discrepancy – FinServCo',  created:'2026-04-24 10:08',firstAssign:'2026-04-24 10:19:33',firstUpdate:'2026-04-24 10:32:47'},
-      {month:'2026-03',bugId:'b/501923456',escalation:'70234567',subject:'Billing – Credit Adjustment – RetailChain',  created:'2026-03-17 14:55',firstAssign:'2026-03-17 15:08:21',firstUpdate:'2026-03-17 15:23:44'},
-      {month:'2026-02',bugId:'b/499678901',escalation:'69012345',subject:'Billing – Payment Failure – InsuranceCo',   created:'2026-02-20 09:41',firstAssign:'2026-02-20 09:52:17',firstUpdate:'2026-02-20 10:07:33'},
-      {month:'2026-01',bugId:'b/498123456',escalation:'67923456',subject:'Billing – Quota Charge Error – FinServCo',  created:'2026-01-25 11:18',firstAssign:'2026-01-25 11:29:44',firstUpdate:'2026-01-25 11:43:09'},
-      {month:'2025-12',bugId:'b/495890123',escalation:'66901234',subject:'Billing – Refund Processing Delay',              created:'2025-12-14 13:37',firstAssign:'2025-12-14 13:48:12',firstUpdate:'2025-12-14 14:01:38'}
+      {month:'2026-04',bugId:'b/503512345',escalation:'70634567',subject:'Billing – Invoice Discrepancy – FinServCo',   created:'2026-04-24 10:08',firstAssign:'2026-04-24 10:19:33',firstUpdate:'2026-04-24 10:32:47'},
+      {month:'2026-03',bugId:'b/501923456',escalation:'70234567',subject:'Billing – Credit Adjustment – RetailChain',   created:'2026-03-17 14:55',firstAssign:'2026-03-17 15:08:21',firstUpdate:'2026-03-17 15:23:44'},
+      {month:'2026-02',bugId:'b/499678901',escalation:'69012345',subject:'Billing – Payment Failure – InsuranceCo',     created:'2026-02-20 09:41',firstAssign:'2026-02-20 09:52:17',firstUpdate:'2026-02-20 10:07:33'},
+      {month:'2026-01',bugId:'b/498123456',escalation:'67923456',subject:'Billing – Quota Charge Error – FinServCo',    created:'2026-01-25 11:18',firstAssign:'2026-01-25 11:29:44',firstUpdate:'2026-01-25 11:43:09'},
+      {month:'2025-12',bugId:'b/495890123',escalation:'66901234',subject:'Billing – Refund Processing Delay',           created:'2025-12-14 13:37',firstAssign:'2025-12-14 13:48:12',firstUpdate:'2025-12-14 14:01:38'}
     ],
     SOCIAL_CARE_ESCALATION: [
-      {month:'2026-04',bugId:'b/503623456',escalation:'70745678',subject:'CUF – Social Care – BrandCo Complaint',  created:'2026-04-25 11:15',firstAssign:'2026-04-25 11:18:42',firstUpdate:'2026-04-25 11:26:19'},
-      {month:'2026-04',bugId:'b/503389012',escalation:'70512345',subject:'CUF – Twitter Escalation – MediaBrand',  created:'2026-04-14 16:28',firstAssign:'2026-04-14 16:36:07',firstUpdate:'2026-04-14 16:48:33'},
-      {month:'2026-03',bugId:'b/502012345',escalation:'70345678',subject:'CUF – LinkedIn Post – TechBrand Crisis', created:'2026-03-23 08:44',firstAssign:'2026-03-23 08:50:19',firstUpdate:'2026-03-23 09:02:47'},
-      {month:'2026-02',bugId:'b/499789012',escalation:'69123456',subject:'CUF – Social Care – MediaBrand Outage',  created:'2026-02-12 14:22',firstAssign:'2026-02-12 14:30:53',firstUpdate:'2026-02-12 14:44:17'},
-      {month:'2026-01',bugId:'b/498234567',escalation:'67934567',subject:'CUF – Community Forum – BrandCo',        created:'2026-01-19 10:35',firstAssign:'2026-01-19 10:41:28',firstUpdate:'2026-01-19 10:53:44'},
-      {month:'2025-12',bugId:'b/495901234',escalation:'67012345',subject:'CUF – Review Response – TechBrand',      created:'2025-12-22 15:09',firstAssign:'2025-12-22 15:17:33',firstUpdate:'2025-12-22 15:29:58'}
+      {month:'2026-04',bugId:'b/503623456',escalation:'70745678',subject:'CUF – Social Care – BrandCo Complaint',       created:'2026-04-25 11:15',firstAssign:'2026-04-25 11:18:42',firstUpdate:'2026-04-25 11:26:19'},
+      {month:'2026-04',bugId:'b/503389012',escalation:'70512345',subject:'CUF – Twitter Escalation – MediaBrand',       created:'2026-04-14 16:28',firstAssign:'2026-04-14 16:36:07',firstUpdate:'2026-04-14 16:48:33'},
+      {month:'2026-03',bugId:'b/502012345',escalation:'70345678',subject:'CUF – LinkedIn Post – TechBrand Crisis',      created:'2026-03-23 08:44',firstAssign:'2026-03-23 08:50:19',firstUpdate:'2026-03-23 09:02:47'},
+      {month:'2026-02',bugId:'b/499789012',escalation:'69123456',subject:'CUF – Social Care – MediaBrand Outage',       created:'2026-02-12 14:22',firstAssign:'2026-02-12 14:30:53',firstUpdate:'2026-02-12 14:44:17'},
+      {month:'2026-01',bugId:'b/498234567',escalation:'67934567',subject:'CUF – Community Forum – BrandCo',             created:'2026-01-19 10:35',firstAssign:'2026-01-19 10:41:28',firstUpdate:'2026-01-19 10:53:44'},
+      {month:'2025-12',bugId:'b/495901234',escalation:'67012345',subject:'CUF – Review Response – TechBrand',           created:'2025-12-22 15:09',firstAssign:'2025-12-22 15:17:33',firstUpdate:'2025-12-22 15:29:58'}
     ]
   };
 
-  // ── Active statuses (used for count badge + age highlight) ────────────
   var ACTIVE_STATUSES = ['Monitoring', 'Investigating', 'Customer Update Pending'];
   function isActive(status) { return ACTIVE_STATUSES.indexOf(status) !== -1; }
 
@@ -201,13 +233,197 @@
     initClock();
     initTabs();
     initModal();
+    initNotifications();
+    initColumnFilters();
+    initPagination();
+    initLogo();
     loadDashboard();
   });
 
+  // ── Logo ──────────────────────────────────────────────────────────────
+  function initLogo() {
+    var logoEl   = $('teamLogo');
+    var fallback = $('teamLogoFallback');
+    if (!logoEl) return;
+
+    function showLogo() { logoEl.style.display = ''; if (fallback) fallback.style.display = 'none'; }
+    function showFallback() { logoEl.style.display = 'none'; if (fallback) fallback.style.display = ''; }
+
+    var gasUrl = (typeof GAS_LOGO_URL !== 'undefined') ? GAS_LOGO_URL : '';
+    if (gasUrl && gasUrl.indexOf('<?') === -1 && gasUrl.length > 4) {
+      // Real base64 URL from GAS server
+      logoEl.src = gasUrl;
+      logoEl.onload = showLogo;
+      logoEl.onerror = showFallback;
+    } else if (typeof google === 'undefined' || !google.script) {
+      // Local browser preview — try sibling-folder path
+      logoEl.src = '../Screenshot 2026-02-03 at 4.13.25 AM.png';
+      logoEl.onload = showLogo;
+      logoEl.onerror = showFallback;
+    } else {
+      showFallback();
+    }
+  }
+
+  // ── User avatar ───────────────────────────────────────────────────────
+  function initUserAvatar(nameOverride) {
+    var el = $('userAvatar');
+    if (!el) return;
+    var name = nameOverride || '';
+    // If GAS_USER_NAME is a real value (not unprocessed template literal), use it
+    if (!name && typeof GAS_USER_NAME !== 'undefined' && GAS_USER_NAME && GAS_USER_NAME.indexOf('<?') === -1) {
+      name = GAS_USER_NAME;
+    }
+    if (name) {
+      setAvatarFromName(el, name);
+    } else if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (u) { if (u && u.initials) setAvatarFromUser(el, u); })
+        .getCurrentUser();
+    } else {
+      setAvatarFromUser(el, { name: 'IEM Admin', initials: 'IA' });
+    }
+  }
+
+  function setAvatarFromName(el, name) {
+    var parts    = name.trim().split(/\s+/);
+    var initials = parts.length >= 2
+      ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+      : name.slice(0, 2).toUpperCase();
+    setAvatarFromUser(el, { name: name, initials: initials });
+  }
+
+  function setAvatarFromUser(el, u) {
+    el.textContent = u.initials;
+    el.title       = 'Logged in as ' + u.name;
+    el.setAttribute('aria-label', 'User: ' + u.name);
+  }
+
+  // ── Notifications ─────────────────────────────────────────────────────
+  function initNotifications() {
+    renderNotifBadge();
+    renderNotifList();
+
+    var btn      = $('notifBtn');
+    var dropdown = $('notifDropdown');
+    var wrap     = $('notifWrap');
+    if (!btn || !dropdown) return;
+
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var isOpen = dropdown.style.display !== 'none';
+      if (isOpen) {
+        closeNotifDropdown();
+      } else {
+        dropdown.style.display = '';
+        btn.setAttribute('aria-expanded', 'true');
+        useClickOutside([wrap], closeNotifDropdown);
+      }
+    });
+
+    var markAllBtn = $('markAllReadBtn');
+    if (markAllBtn) {
+      markAllBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        MOCK_NOTIFICATIONS.forEach(function (n) { n.read = true; });
+        renderNotifBadge();
+        renderNotifList();
+      });
+    }
+  }
+
+  function closeNotifDropdown() {
+    var dropdown = $('notifDropdown');
+    var btn      = $('notifBtn');
+    if (dropdown) dropdown.style.display = 'none';
+    if (btn)      btn.setAttribute('aria-expanded', 'false');
+  }
+
+  function renderNotifBadge() {
+    var unread = MOCK_NOTIFICATIONS.filter(function (n) { return !n.read; }).length;
+    var badge  = $('notifBadge');
+    if (!badge) return;
+    badge.textContent    = unread;
+    badge.style.display  = unread > 0 ? '' : 'none';
+    var btn = $('notifBtn');
+    if (btn) btn.setAttribute('aria-label', 'Notifications' + (unread > 0 ? ' — ' + unread + ' unread' : ''));
+  }
+
+  function renderNotifList() {
+    var list = $('notifList');
+    if (!list) return;
+    if (!MOCK_NOTIFICATIONS.length) {
+      list.innerHTML = '<div class="notif-empty">No notifications</div>';
+      return;
+    }
+    list.innerHTML = MOCK_NOTIFICATIONS.map(function (n) {
+      return '<div class="notif-item' + (n.read ? '' : ' notif-unread') + '" data-notif-id="' + esc(n.id) + '" tabindex="0" role="menuitem">' +
+        '<div class="notif-item-meta">' +
+          '<span class="notif-bug-id">' + esc(n.bugId) + '</span>' +
+          '<span class="notif-ts">' + timeAgo(n.ts) + '</span>' +
+        '</div>' +
+        '<div class="notif-item-title">' + esc(n.title) + '</div>' +
+        '<div class="notif-item-body">' + esc(n.body) + '</div>' +
+      '</div>';
+    }).join('');
+
+    list.querySelectorAll('.notif-item').forEach(function (item) {
+      item.addEventListener('click', function () {
+        var id = item.dataset.notifId;
+        MOCK_NOTIFICATIONS.forEach(function (n) { if (n.id === id) n.read = true; });
+        renderNotifBadge();
+        item.classList.remove('notif-unread');
+      });
+    });
+  }
+
+  // ── Column filters ────────────────────────────────────────────────────
+  function initColumnFilters() {
+    document.querySelectorAll('.col-filter').forEach(function (input) {
+      input.addEventListener('input', function () {
+        colFilters[input.dataset.col] = input.value;
+        currentPage = 1;
+        renderIncidentTable(MOCK_INCIDENTS[activeTabId] || []);
+      });
+      // Prevent table row click from firing when user clicks the input
+      input.addEventListener('click', function (e) { e.stopPropagation(); });
+      input.addEventListener('keydown', function (e) { e.stopPropagation(); });
+    });
+  }
+
+  // ── Pagination ────────────────────────────────────────────────────────
+  function initPagination() {
+    var prevBtn = $('prevPageBtn');
+    var nextBtn = $('nextPageBtn');
+    if (prevBtn) prevBtn.addEventListener('click', function () {
+      if (currentPage > 1) { currentPage--; renderIncidentTable(MOCK_INCIDENTS[activeTabId] || []); }
+    });
+    if (nextBtn) nextBtn.addEventListener('click', function () {
+      currentPage++;
+      renderIncidentTable(MOCK_INCIDENTS[activeTabId] || []);
+    });
+  }
+
+  function updatePaginationBar(page, totalPages, total, start, pageCount) {
+    var bar     = $('paginationBar');
+    var info    = $('pageInfo');
+    var prevBtn = $('prevPageBtn');
+    var nextBtn = $('nextPageBtn');
+    if (!bar) return;
+    if (total === 0) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+    if (info) {
+      var end = start + pageCount;
+      info.textContent = 'Page ' + page + ' of ' + totalPages + ' — showing ' + (start + 1) + '–' + end + ' of ' + total;
+    }
+    if (prevBtn) prevBtn.disabled = (page <= 1);
+    if (nextBtn) nextBtn.disabled = (page >= totalPages);
+  }
+
   // ── Theme ─────────────────────────────────────────────────────────────
   function initTheme() {
-    var saved  = localStorage.getItem('iem-theme');
-    var theme  = saved || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    var saved = localStorage.getItem('iem-theme');
+    var theme = saved || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
     applyTheme(theme);
     $('themeToggleBtn').addEventListener('click', function () {
       applyTheme(document.body.classList.contains('theme-light') ? 'dark' : 'light');
@@ -244,6 +460,11 @@
   function switchTab(tabId) {
     activeTabId   = tabId;
     selectedRowId = null;
+    currentPage   = 1;
+
+    // Reset column filters
+    Object.keys(colFilters).forEach(function (k) { colFilters[k] = ''; });
+    document.querySelectorAll('.col-filter').forEach(function (i) { i.value = ''; });
 
     document.querySelectorAll('.tab').forEach(function (b) {
       var on = b.dataset.tab === tabId;
@@ -251,9 +472,7 @@
       b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
 
-    var cp = $('commsPanel');
-    if (cp) cp.innerHTML = '';
-
+    closeCommsPanel();
     renderActiveTab();
   }
 
@@ -276,6 +495,7 @@
   function onDataLoaded(data) {
     updateFooter(data.systemHealth || {});
     showDashboard();
+    initUserAvatar();
   }
 
   function onDataError(err) {
@@ -287,56 +507,82 @@
     var tab = TABS.find(function (t) { return t.id === activeTabId; });
     if (!tab) return;
 
-    // Subheader label
     var labelEl = $('activeTabLabel');
     if (labelEl) labelEl.textContent = tab.label;
 
-    // Incidents for this tab
-    var incidents = MOCK_INCIDENTS[activeTabId] || [];
+    var incidents   = MOCK_INCIDENTS[activeTabId] || [];
     var activeCount = incidents.filter(function (i) { return isActive(i.status); }).length;
 
-    var countEl = $('activeTabCount');
-    if (countEl) countEl.textContent = activeCount + ' active';
+    var countEl = $('activeTabCount'); if (countEl) countEl.textContent = activeCount + ' active';
+    var badgeEl = $('activeBadge');    if (badgeEl) badgeEl.textContent = activeCount + ' ACTIVE';
 
-    var badgeEl = $('activeBadge');
-    if (badgeEl) badgeEl.textContent = activeCount + ' ACTIVE';
-
-    // Analytics header labels
-    var kpiEl = $('kpiTag');     if (kpiEl) kpiEl.textContent = tab.kpi;
-    var ctEl  = $('chartTitle'); if (ctEl)  ctEl.textContent  = tab.chartTitle;
-    var rdEl  = $('rawDataTitle'); if (rdEl) rdEl.textContent = tab.rawTitle;
+    var kpiEl = $('kpiTag');       if (kpiEl) kpiEl.textContent = tab.kpi;
+    var ctEl  = $('chartTitle');   if (ctEl)  ctEl.textContent  = tab.chartTitle;
+    var rdEl  = $('rawDataTitle'); if (rdEl)  rdEl.textContent  = tab.rawTitle;
 
     renderIncidentTable(incidents);
 
-    // Start live age ticker (refresh every 60 s)
     clearInterval(ageIntervalId);
-    ageIntervalId = setInterval(function () { refreshEscalationAges(); }, 60000);
+    ageIntervalId = setInterval(refreshEscalationAges, 60000);
 
     if (analyticsInited) applyAnalyticsFilter(activePeriod);
   }
 
-  // ── Incident table ────────────────────────────────────────────────────
+  // ── Incident table — sort ↓ createdAt, filter, paginate ──────────────
   function renderIncidentTable(incidents) {
     var tbody = $('liveEscTbody');
     if (!tbody) return;
     var now = Date.now();
 
-    if (!incidents.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="8">No escalations for this category.</td></tr>';
+    // 1. Sort newest first
+    var sorted = incidents.slice().sort(function (a, b) {
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+    // 2. Apply column filters
+    var filtered = sorted.filter(function (inc) {
+      var age = calcEscalationAge(inc.createdAt, now);
+      var vals = {
+        requestingPoc: inc.requestingPoc,
+        ticketId:      inc.ticketId,
+        productArea:   inc.productArea + ' ' + inc.severity,
+        status:        inc.status,
+        customerName:  inc.customerName + ' ' + inc.serviceLevel,
+        fmr:           inc.fmr || '',
+        age:           age
+      };
+      return Object.keys(colFilters).every(function (col) {
+        var f = (colFilters[col] || '').toLowerCase().trim();
+        return !f || String(vals[col] || '').toLowerCase().indexOf(f) !== -1;
+      });
+    });
+
+    // 3. Paginate
+    var totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    if (currentPage > totalPages) currentPage = totalPages;
+    var start     = (currentPage - 1) * PAGE_SIZE;
+    var pageItems = filtered.slice(start, start + PAGE_SIZE);
+
+    updatePaginationBar(currentPage, totalPages, filtered.length, start, pageItems.length);
+
+    // 4. Render
+    if (!pageItems.length) {
+      var hasFilter = Object.keys(colFilters).some(function (k) { return colFilters[k]; });
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="8">' +
+        (hasFilter ? 'No results match the current filters.' : 'No escalations for this category.') +
+        '</td></tr>';
       return;
     }
 
-    tbody.innerHTML = incidents.map(function (inc) {
-      var age   = calcEscalationAge(inc.createdAt, now);
+    tbody.innerHTML = pageItems.map(function (inc) {
+      var age    = calcEscalationAge(inc.createdAt, now);
       var active = isActive(inc.status);
-      var fc    = fmrClass(inc.fmr);
+      var fc     = fmrClass(inc.fmr);
       return '<tr data-id="' + esc(inc.id) + '" data-created="' + esc(inc.createdAt) + '" tabindex="0"' +
              (selectedRowId === inc.id ? ' class="selected"' : '') + '>' +
         '<td class="bold">' + esc(inc.requestingPoc) + '</td>' +
         '<td class="mono">' + esc(inc.ticketId) + '</td>' +
-        '<td>' +
-          '<span class="product-area">' + esc(inc.productArea) + '</span> ' + severityBadge(inc.severity) +
-        '</td>' +
+        '<td><span class="product-area">' + esc(inc.productArea) + '</span>' + severityBadge(inc.severity) + '</td>' +
         '<td>' + statusCell(inc.status) + '</td>' +
         '<td>' + esc(inc.customerName) + '<span class="svc-level"> / ' + esc(inc.serviceLevel) + '</span></td>' +
         '<td class="text-right"><button class="btn-log" data-id="' + esc(inc.id) + '" data-ticket="' + esc(inc.ticketId) + '" aria-label="Open comms log for ' + esc(inc.ticketId) + '">OPEN LOG</button></td>' +
@@ -345,27 +591,26 @@
       '</tr>';
     }).join('');
 
-    // Row click → inline comms; button click → modal
     tbody.querySelectorAll('tr[data-id]').forEach(function (row) {
       row.addEventListener('click', function (e) {
-        if (e.target.classList.contains('btn-log')) return;
+        if (e.target.closest('.btn-log')) return;
         selectRow(row.dataset.id);
       });
       row.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') selectRow(row.dataset.id);
+        if (e.key === 'Enter' && !e.target.closest('.btn-log')) selectRow(row.dataset.id);
       });
     });
     tbody.querySelectorAll('.btn-log').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        openLogModal(btn.dataset.id, btn.dataset.ticket);
+        selectRow(btn.dataset.id);
       });
     });
   }
 
-  // Refresh only the age cells without full re-render
+  // Live age ticker — patches only .age-cell text, no full re-render
   function refreshEscalationAges() {
-    var now = Date.now();
+    var now   = Date.now();
     var tbody = $('liveEscTbody');
     if (!tbody) return;
     tbody.querySelectorAll('tr[data-created]').forEach(function (row) {
@@ -374,71 +619,94 @@
     });
   }
 
+  // ── Row selection + comms panel ───────────────────────────────────────
   function selectRow(id) {
     selectedRowId = id;
     var tbody = $('liveEscTbody');
-    if (tbody) {
-      tbody.querySelectorAll('tr[data-id]').forEach(function (r) {
-        r.classList.toggle('selected', r.dataset.id === id);
-      });
-    }
+    if (tbody) tbody.querySelectorAll('tr[data-id]').forEach(function (r) {
+      r.classList.toggle('selected', r.dataset.id === id);
+    });
     renderInlineComms(id);
+
+    // Wire up click-outside — clicks outside both the card and panel close the panel
+    if (commsPanelCleanup) commsPanelCleanup();
+    commsPanelCleanup = useClickOutside(
+      [$('liveEscCard'), $('commsPanel')],
+      closeCommsPanel
+    );
+  }
+
+  function closeCommsPanel() {
+    var panel = $('commsPanel');
+    if (panel) panel.innerHTML = '';
+    selectedRowId = null;
+    var tbody = $('liveEscTbody');
+    if (tbody) tbody.querySelectorAll('tr[data-id]').forEach(function (r) { r.classList.remove('selected'); });
+    if (commsPanelCleanup) { commsPanelCleanup(); commsPanelCleanup = null; }
   }
 
   // ── Inline comms blast ────────────────────────────────────────────────
   function renderInlineComms(incidentId) {
     var panel = $('commsPanel');
     if (!panel) return;
-
     var inc = findIncident(incidentId);
     if (!inc) return;
 
-    panel.innerHTML = '<div class="comms-panel"><div class="comms-panel-header"><div class="comms-dot"></div>' +
-      '<span class="section-label">Latest Comms Blast — ' + esc(inc.ticketId) + '</span></div>' +
-      '<div class="comms-panel-body"><div class="state-panel compact"><div class="spinner"></div><p>Loading…</p></div></div></div>';
+    panel.innerHTML =
+      '<div class="comms-panel">' +
+        '<div class="comms-panel-header"><div class="comms-dot"></div>' +
+          '<span class="section-label">Latest Comms Blast — ' + esc(inc.ticketId) + '</span>' +
+        '</div>' +
+        '<div class="comms-panel-body"><div class="state-panel compact"><div class="spinner"></div><p>Loading…</p></div></div>' +
+      '</div>';
 
     if (typeof google !== 'undefined' && google.script) {
       google.script.run
         .withSuccessHandler(function (logs) { renderInlineLog(panel, inc, logs); })
-        .withFailureHandler(function ()     { renderInlineLog(panel, inc, buildMockLog(incidentId)); })
+        .withFailureHandler(function ()     { renderInlineLog(panel, inc, buildMockLog()); })
         .getCommunicationLog(incidentId);
     } else {
-      setTimeout(function () { renderInlineLog(panel, inc, buildMockLog(incidentId)); }, 300);
+      setTimeout(function () { renderInlineLog(panel, inc, buildMockLog()); }, 300);
     }
   }
 
-  function buildMockLog(incidentId) {
+  function buildMockLog() {
     var now = Date.now();
     return [
-      { timestamp: new Date(now - 7200000).toISOString(), author: 'system-bot',   message: 'Incident opened. Initial triage in progress.',             audience: 'IEM' },
-      { timestamp: new Date(now - 5400000).toISOString(), author: 'IEM Desk',     message: 'Comms bridge established. Stakeholders notified.',           audience: 'Executive' },
-      { timestamp: new Date(now - 3600000).toISOString(), author: 'MIM-ADMIN-01', message: 'Root cause identified. Mitigation steps underway.',          audience: 'IEM' },
-      { timestamp: new Date(now -  900000).toISOString(), author: 'MIM-ADMIN-01', message: 'Mitigation 80% complete. Monitoring for full recovery.',      audience: 'Executive' }
+      { timestamp: new Date(now - 7200000).toISOString(), author: 'system-bot',   message: 'Incident opened. Initial triage in progress.',        audience: 'IEM' },
+      { timestamp: new Date(now - 5400000).toISOString(), author: 'IEM Desk',     message: 'Comms bridge established. Stakeholders notified.',     audience: 'Executive' },
+      { timestamp: new Date(now - 3600000).toISOString(), author: 'MIM-ADMIN-01', message: 'Root cause identified. Mitigation steps underway.',   audience: 'IEM' },
+      { timestamp: new Date(now -  900000).toISOString(), author: 'MIM-ADMIN-01', message: 'Mitigation 80% complete. Monitoring for recovery.',   audience: 'Executive' }
     ];
   }
 
   function renderInlineLog(panel, inc, logs) {
-    var latest = logs.length ? logs[logs.length - 1] : null;
+    var latest   = logs.length ? logs[logs.length - 1] : null;
     var histRows = logs.slice().reverse().map(function (l, i) {
       return '<tr><td class="ts">' + formatTs(l.timestamp) + '</td>' +
              '<td>' + (i === logs.length - 1 ? 'Initial Update' : 'Update #' + (logs.length - 1 - i)) + '</td>' +
              '<td>' + esc(l.author) + '</td></tr>';
     }).join('');
+    var msgText = latest ? latest.message : 'No communications logged yet.';
+    var safeMsg = msgText.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
     panel.innerHTML =
       '<div class="comms-panel">' +
         '<div class="comms-panel-header"><div class="comms-dot"></div>' +
-          '<span class="section-label">Latest Comms Blast — ' + esc(inc.ticketId) + '</span></div>' +
+          '<span class="section-label">Latest Comms Blast — ' + esc(inc.ticketId) + '</span>' +
+        '</div>' +
         '<div class="comms-panel-body">' +
-          '<div class="comms-message-box"><p class="comms-message-text">' + esc(latest ? latest.message : 'No communications logged yet.') + '</p></div>' +
+          '<div class="comms-message-box"><p class="comms-message-text">' + esc(msgText) + '</p></div>' +
           '<div class="comms-meta">' +
             '<span>' + (latest ? 'Sent ' + timeAgo(latest.timestamp) : '—') + '</span>' +
             '<span>BY: ' + esc(latest ? latest.author : '—') + '</span>' +
-            '<button class="btn-log" onclick="copyCommsText(\'' + (latest ? latest.message.replace(/\\/g,'\\\\').replace(/'/g,"\\'") : '') + '\')">Copy Text</button>' +
+            '<button class="btn-log" onclick="copyCommsText(\'' + safeMsg + '\')">Copy Text</button>' +
           '</div>' +
-          (histRows ? '<div class="comms-history-title">History of Comms</div>' +
-            '<table class="comms-history-table"><thead><tr><th>Timestamp</th><th>Type</th><th>IEM POC</th></tr></thead>' +
-            '<tbody>' + histRows + '</tbody></table>' : '') +
+          (histRows
+            ? '<div class="comms-history-title">History of Comms</div>' +
+              '<table class="comms-history-table"><thead><tr><th>Timestamp</th><th>Type</th><th>IEM POC</th></tr></thead>' +
+              '<tbody>' + histRows + '</tbody></table>'
+            : '') +
         '</div>' +
       '</div>';
   }
@@ -464,8 +732,7 @@
     bd.style.display = 'flex';
     bd.setAttribute('aria-hidden', 'false');
     $('modalCloseBtn').focus();
-
-    setTimeout(function () { renderModalLog(buildMockLog(incidentId)); }, 400);
+    setTimeout(function () { renderModalLog(buildMockLog()); }, 400);
   }
 
   function renderModalLog(logs) {
@@ -507,22 +774,20 @@
   }
 
   function applyAnalyticsFilter(period) {
-    var monthly = MOCK_MONTHLY[activeTabId] || [];
-    var raw     = MOCK_RAW[activeTabId]     || [];
+    var monthly  = MOCK_MONTHLY[activeTabId] || [];
+    var raw      = MOCK_RAW[activeTabId]     || [];
     var fMonthly = getFilteredMonthly(monthly, period);
     var fRaw     = getFilteredRaw(raw, monthly, period);
-
     renderComboChart(fMonthly);
     renderRawTable(fRaw);
     updateSloSummary(fMonthly);
-
     var rcEl = $('rawDataCount');
     if (rcEl) rcEl.textContent = fRaw.length + ' record' + (fRaw.length !== 1 ? 's' : '');
   }
 
   function getFilteredMonthly(all, period) {
     if (period === 'Q') return aggregateByQuarter(all);
-    var n = { '1W': 1, '1M': 1, '3M': 3, '6M': 6, 'Y': 12 }[period] || 3;
+    var n = { '1W':1, '1M':1, '3M':3, '6M':6, 'Y':12 }[period] || 3;
     return all.slice(-n);
   }
 
@@ -545,7 +810,7 @@
 
   function getFilteredRaw(raw, monthly, period) {
     if (period === 'Q' || period === 'Y') return raw;
-    var n = { '1W': 1, '1M': 1, '3M': 3, '6M': 6 }[period] || 3;
+    var n       = { '1W':1, '1M':1, '3M':3, '6M':6 }[period] || 3;
     var allowed = monthly.slice(-n).map(function (d) { return d.month; });
     return raw.filter(function (r) { return allowed.indexOf(r.month) !== -1; });
   }
@@ -565,7 +830,7 @@
       barBorder: dark ? 'rgb(59,130,246)'         : 'rgb(37,99,235)',
       lineFg:    dark ? 'rgb(239,68,68)'          : 'rgb(220,38,38)',
       linePtBg:  dark ? '#18181b'                 : '#ffffff',
-      gridColor: dark ? 'rgba(39,39,42,0.7)'     : 'rgba(226,232,240,0.8)',
+      gridColor: dark ? 'rgba(39,39,42,0.7)'      : 'rgba(226,232,240,0.8)',
       tickColor: dark ? '#71717a'                 : '#64748b',
       ttBg:      dark ? '#27272a'                 : '#ffffff',
       ttText:    dark ? '#e4e4e7'                 : '#0f172a',
@@ -583,20 +848,14 @@
       data: {
         labels: data.map(function (d) { return d.month; }),
         datasets: [
-          {
-            type: 'bar', label: 'Count',
-            data: data.map(function (d) { return d.count; }),
+          { type:'bar',  label:'Count',           data: data.map(function (d) { return d.count; }),
             backgroundColor: c.barBg, borderColor: c.barBorder,
-            borderWidth: 1, borderRadius: 3, yAxisID: 'yCount', order: 2
-          },
-          {
-            type: 'line', label: 'SLO Compliance %',
-            data: data.map(function (d) { return d.slo; }),
+            borderWidth: 1, borderRadius: 3, yAxisID: 'yCount', order: 2 },
+          { type:'line', label:'SLO Compliance %', data: data.map(function (d) { return d.slo; }),
             borderColor: c.lineFg, backgroundColor: 'transparent',
             pointBackgroundColor: c.linePtBg, pointBorderColor: c.lineFg,
             pointBorderWidth: 2, pointRadius: 4, pointHoverRadius: 6,
-            borderWidth: 2, tension: 0.35, yAxisID: 'ySlo', order: 1
-          }
+            borderWidth: 2, tension: 0.35, yAxisID: 'ySlo', order: 1 }
         ]
       },
       options: {
@@ -610,29 +869,22 @@
             callbacks: {
               label: function (ctx) {
                 return ctx.dataset.label === 'SLO Compliance %'
-                  ? '  SLO: ' + ctx.parsed.y + '%'
-                  : '  Count: ' + ctx.parsed.y;
+                  ? '  SLO: ' + ctx.parsed.y + '%' : '  Count: ' + ctx.parsed.y;
               }
             }
           }
         },
         scales: {
-          x: {
-            grid: { color: c.gridColor },
-            ticks: { color: c.tickColor, font: { size: 10, family: "'SF Mono', monospace" } }
-          },
-          yCount: {
-            type: 'linear', position: 'left', beginAtZero: true,
-            grid: { color: c.gridColor },
-            ticks: { color: c.tickColor, font: { size: 10 }, precision: 0 },
-            title: { display: true, text: 'Count', color: c.tickColor, font: { size: 10, weight: '700' } }
-          },
-          ySlo: {
-            type: 'linear', position: 'right', min: 50, max: 100,
-            grid: { drawOnChartArea: false },
-            ticks: { color: c.lineFg, font: { size: 10 }, callback: function (v) { return v + '%'; } },
-            title: { display: true, text: 'SLO %', color: c.lineFg, font: { size: 10, weight: '700' } }
-          }
+          x: { grid: { color: c.gridColor },
+               ticks: { color: c.tickColor, font: { size: 10, family: "'SF Mono', monospace" } } },
+          yCount: { type:'linear', position:'left', beginAtZero:true,
+                    grid: { color: c.gridColor },
+                    ticks: { color: c.tickColor, font: { size: 10 }, precision: 0 },
+                    title: { display:true, text:'Count', color: c.tickColor, font: { size:10, weight:'700' } } },
+          ySlo:   { type:'linear', position:'right', min:50, max:100,
+                    grid: { drawOnChartArea: false },
+                    ticks: { color: c.lineFg, font: { size:10 }, callback: function(v){ return v+'%'; } },
+                    title: { display:true, text:'SLO %', color: c.lineFg, font: { size:10, weight:'700' } } }
         }
       }
     });
@@ -682,8 +934,8 @@
   // ── Footer ────────────────────────────────────────────────────────────
   function updateFooter(h) {
     var l = $('footer-left'), r = $('footer-right');
-    if (l && h.version)     l.textContent = h.version + ' | AUTHENTICATED: ' + h.authenticatedAs;
-    if (r && h.apiLatency)  r.innerHTML   = 'API: ' + h.apiLatency + ' | <span class="uptime">UPTIME: ' + h.uptime + '</span> | LOG: ' + h.logRate;
+    if (l && h.version)    l.textContent = h.version + ' | AUTHENTICATED: ' + h.authenticatedAs;
+    if (r && h.apiLatency) r.innerHTML   = 'API: ' + h.apiLatency + ' | <span class="uptime">UPTIME: ' + h.uptime + '</span> | LOG: ' + h.logRate;
   }
 
   // ── Toast ─────────────────────────────────────────────────────────────
@@ -701,14 +953,17 @@
   }
 
   function severityBadge(sev) {
-    var s = String(sev || '').toLowerCase();
-    var cls = s === 'huge' ? 'badge-sev-huge' : s === 'p0' ? 'badge-sev-p0' : s === 'major' ? 'badge-sev-major' : s === 'p1' ? 'badge-sev-p1' : 'badge-sev-other';
+    var s   = String(sev || '').toLowerCase();
+    var cls = s === 'huge' ? 'badge-sev-huge' : s === 'p0' ? 'badge-sev-p0' :
+              s === 'major' ? 'badge-sev-major' : s === 'p1' ? 'badge-sev-p1' : 'badge-sev-other';
     return '<span class="badge ' + cls + '">' + esc(sev) + '</span>';
   }
 
   function statusCell(status) {
-    var s = String(status || '').toLowerCase();
-    var dot = s === 'monitoring' ? 'pulse-dot' : s === 'investigating' ? 'pulse-dot red' : s === 'customer update pending' ? 'pulse-dot amber' : 'pulse-dot static';
+    var s   = String(status || '').toLowerCase();
+    var dot = s === 'monitoring' ? 'pulse-dot' :
+              s === 'investigating' ? 'pulse-dot red' :
+              s === 'customer update pending' ? 'pulse-dot amber' : 'pulse-dot static';
     return '<div class="status-cell"><span class="' + dot + '" aria-hidden="true"></span>' + esc(status) + '</div>';
   }
 
@@ -716,8 +971,8 @@
     if (!iso) return '—';
     try {
       var d = new Date(iso);
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
-             d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+      return d.toLocaleDateString('en-US', { month:'short', day:'numeric' }) + ' ' +
+             d.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', hour12:false });
     } catch (e) { return iso; }
   }
 
@@ -726,7 +981,8 @@
     var diff = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
     if (diff < 1)  return 'just now';
     if (diff < 60) return diff + 'm ago';
-    return Math.floor(diff / 60) + 'h ' + (diff % 60) + 'm ago';
+    var h = Math.floor(diff / 60);
+    return h + 'h ' + (diff % 60) + 'm ago';
   }
 
   function findIncident(id) {
