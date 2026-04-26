@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Critical Incidents and Escalations Comms Dashboard</title>
+  <?!= include('Styles') ?>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body class="theme-dark" data-theme="dark">
+
+  <!-- ── TOP NAV ───────────────────────────────────────────────────────── -->
+  <nav class="topnav" role="banner">
+    <div class="topnav-left">
+      <div class="logo-block" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      </div>
+      <div class="title-block">
+        <span class="team-label">IEM TEAM</span>
+        <span class="dashboard-title">Critical Incidents and Escalations Comms Dashboard</span>
+      </div>
+    </div>
+    <div class="topnav-right">
+      <div class="clock-block" aria-live="polite" aria-label="US Pacific Time">
+        <span class="clock-label">US/PACIFIC TIME</span>
+        <span class="clock-value" id="clock">--:--:--</span>
+      </div>
+      <button class="icon-btn theme-toggle" id="themeToggleBtn" aria-label="Toggle colour theme" title="Toggle theme">
+        <svg id="themeIconDark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg id="themeIconLight" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <button class="icon-btn notif-btn" aria-label="Notifications" title="Notification Centre">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="notif-dot" aria-hidden="true"></span>
+      </button>
+      <div class="avatar" title="Logged in as Likitha (LK)" aria-label="User: Likitha">LK</div>
+    </div>
+  </nav>
+
+  <!-- ── TAB BAR ───────────────────────────────────────────────────────── -->
+  <div class="tabbar" role="tablist" aria-label="Escalation categories">
+    <button class="tab active" role="tab" aria-selected="true"  data-tab="EXEC_ESCALATIONS"       id="tab-EXEC">EXEC Escalations</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="P0_P1_ESCALATION"        id="tab-P0P1">P0/P1 Escalation</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="MCS"                     id="tab-MCS">MCS</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="GUP_ESCALATION"          id="tab-GUP">gUP Escalation</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="BILLING_ESCALATION"      id="tab-BIL">Billing Escalation</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="SOCIAL_CARE_ESCALATION"  id="tab-SOC">Social Care Escalation</button>
+  </div>
+
+  <!-- ── MAIN ──────────────────────────────────────────────────────────── -->
+  <main class="main-content" role="main">
+
+    <!-- Loading -->
+    <div id="loadingState" class="state-panel" role="status" aria-live="polite">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Loading dashboard data…</p>
+    </div>
+
+    <!-- Error -->
+    <div id="errorState" class="state-panel" style="display:none" role="alert">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <p id="errorMsg">Failed to load data.</p>
+      <button class="btn-secondary" onclick="loadDashboard()">Retry</button>
+    </div>
+
+    <!-- ── UNIFIED DASHBOARD PANEL ─────────────────────────────────────── -->
+    <div id="dashboardContent" style="display:none">
+
+      <!-- Sub-header -->
+      <div class="subheader" id="panelSubheader">
+        <span class="section-label" id="activeTabLabel">EXEC ESCALATIONS</span>
+        <span class="pill" id="activeTabCount"></span>
+      </div>
+
+      <!-- ── SECTION 1: LIVE ESCALATIONS TABLE ───────────────────────── -->
+      <section class="card" id="liveEscCard">
+        <div class="card-header">
+          <span class="section-label">Live Escalations</span>
+          <div class="header-pills">
+            <span class="pill">ALL</span>
+            <span class="pill pill-red" id="activeBadge">0 ACTIVE</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="incident-table" id="liveEscTable" aria-label="Live escalations">
+            <thead>
+              <tr>
+                <th>Requesting POC</th>
+                <th>IEM Bug ID / Vector Case</th>
+                <th>Product / Product Area</th>
+                <th>Status</th>
+                <th>Customer / Service Level</th>
+                <th class="text-right">Comms Update</th>
+                <th>FMR</th>
+                <th>Escalation Age</th>
+              </tr>
+            </thead>
+            <tbody id="liveEscTbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Inline comms blast (shown when row is clicked) -->
+      <div id="commsPanel"></div>
+
+      <!-- ── SECTION 2: PERFORMANCE ANALYTICS ────────────────────────── -->
+      <section class="analytics-section" id="analyticsSection" aria-label="Performance Analytics">
+
+        <!-- Header + timeline filter -->
+        <div class="analytics-header">
+          <div class="analytics-header-left">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            <span class="analytics-title">Performance Analytics</span>
+          </div>
+          <div class="timeline-filter" role="group" aria-label="Select time period">
+            <button class="timeline-btn" data-period="1W">1W</button>
+            <button class="timeline-btn" data-period="1M">1M</button>
+            <button class="timeline-btn active" data-period="3M">3M</button>
+            <button class="timeline-btn" data-period="6M">6M</button>
+            <button class="timeline-btn" data-period="Q">Quarterly</button>
+            <button class="timeline-btn" data-period="Y">Yearly</button>
+          </div>
+        </div>
+
+        <!-- Chart + raw data side by side -->
+        <div class="analytics-row">
+
+          <!-- Left: Combo chart -->
+          <div class="analytics-left card">
+            <div class="analytics-panel-hdr">
+              <span class="kpi-tag" id="kpiTag">KR2</span>
+              <span class="analytics-panel-title" id="chartTitle">First Meaningful Update</span>
+              <span class="slo-badge" id="sloSummary"></span>
+            </div>
+            <div class="chart-container-wrap">
+              <canvas id="mainChart" aria-label="Dual-axis bar and line chart: ticket count and SLO compliance"></canvas>
+            </div>
+            <div class="chart-legend">
+              <span class="legend-item"><span class="legend-swatch swatch-bar"></span>Count</span>
+              <span class="legend-item"><span class="legend-swatch swatch-line"></span>SLO Compliance %</span>
+            </div>
+          </div>
+
+          <!-- Right: Raw data table -->
+          <div class="analytics-right card">
+            <div class="analytics-panel-hdr">
+              <span class="analytics-panel-title" id="rawDataTitle">RawData</span>
+              <span class="rawdata-count" id="rawDataCount"></span>
+            </div>
+            <div class="rawdata-wrap">
+              <table class="rawdata-table" aria-label="Historical raw data">
+                <thead>
+                  <tr>
+                    <th>Month</th>
+                    <th>Bug ID</th>
+                    <th>Escalation #</th>
+                    <th>Subject</th>
+                    <th>Created</th>
+                    <th>First Assign</th>
+                    <th>First Update</th>
+                  </tr>
+                </thead>
+                <tbody id="rawDataTbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </section>
+    </div><!-- /dashboardContent -->
+  </main>
+
+  <!-- ── FOOTER ────────────────────────────────────────────────────────── -->
+  <footer class="footer" role="contentinfo">
+    <div class="footer-left" id="footer-left">v4.2.1-RELEASE | AUTHENTICATED: MIM-ADMIN-01</div>
+    <div class="footer-right" id="footer-right">API: 12MS | UPTIME: 99.98% | LOG: 12.4K/S</div>
+  </footer>
+
+  <!-- ── COMMS LOG MODAL ────────────────────────────────────────────────── -->
+  <div class="modal-backdrop" id="logModalBackdrop" aria-hidden="true" style="display:none"
+       role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalTitle">Comms Log</h3>
+        <button class="icon-btn modal-close" id="modalCloseBtn" aria-label="Close communications log">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="modalLoading" class="state-panel compact"><div class="spinner"></div><p>Loading log…</p></div>
+        <div id="modalError"   class="state-panel compact" style="display:none" role="alert"><p id="modalErrorMsg">Failed to load log.</p></div>
+        <div id="modalLog"     style="display:none"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TOAST ─────────────────────────────────────────────────────────── -->
+  <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true" style="display:none"></div>
+
+  <?!= include('ClientScript') ?>
+</body>
+</html>
