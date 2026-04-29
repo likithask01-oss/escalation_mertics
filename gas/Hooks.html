@@ -1,0 +1,662 @@
+<script>
+/* ══════════════════════════════════════════════════════════════════════
+   Hooks.html  —  DATA LAYER ONLY
+   Backend engineers: change DATA_ENDPOINT.type to swap the backend.
+   Presentation layer (ClientScript.html) must never be touched for
+   backend changes. It only subscribes to hooks defined here.
+══════════════════════════════════════════════════════════════════════ */
+
+/* ── Backend config (single change-point) ────────────────────────── */
+var DATA_ENDPOINT = {
+  type:       'mock',   // 'mock' | 'gas' | 'rest' | 'graphql'
+  baseUrl:    '',       // REST: 'https://api.example.com/v1'
+  graphqlUrl: '',       // GraphQL endpoint URL
+  headers:    {}        // e.g. { 'Authorization': 'Bearer TOKEN' }
+};
+
+/* ── Tab filter functions (presentation calls these) ─────────────── */
+var TAB_FILTERS = {
+  EXEC_ESCALATIONS: function (r) {
+    var type = (r.iem_escalation_type || '').toLowerCase();
+    var subj = (r.subject || '').toLowerCase();
+    return type.indexOf('exec escalation') !== -1 &&
+           (subj.indexOf('email - fwd') !== -1 || subj.indexOf('email - re') !== -1);
+  },
+  MCS: function (r) {
+    return (r.subject || '').toLowerCase().indexOf('mcs sf prod') !== -1;
+  },
+  CUF_P0_P1: function (r) {
+    var s = (r.subject || '').toLowerCase();
+    return s.indexOf('cuf - account team') !== -1 || s.indexOf('cuf - other') !== -1;
+  },
+  CUF_GUP: function (r) {
+    return (r.subject || '').toLowerCase().indexOf('cuf - gup') !== -1;
+  },
+  CUF_BILLING: function (r) {
+    return (r.iem_escalation_type || '').toLowerCase() === 'billing related';
+  },
+  SOCIAL_CARE: function (r) {
+    return (r.iem_escalation_type || '').toLowerCase().indexOf('social care') !== -1;
+  }
+};
+
+/* ── Shared helpers (consumed by ClientScript) ───────────────────── */
+function deriveStatus(row) {
+  var derived;
+  if (row.created_timestamp && !row.closed_timestamp) {
+    derived = 'In Progress';
+  } else if (row.created_timestamp && row.closed_timestamp) {
+    derived = 'Closed';
+  } else {
+    derived = 'Unknown';
+  }
+  // Conflict: raw status wins if it differs from derived
+  if (row.status && row.status !== derived) return row.status;
+  return derived;
+}
+
+function formatResolutionAge(hours) {
+  if (hours == null || isNaN(hours)) return '—';
+  var totalMins = Math.round(Number(hours) * 60);
+  if (totalMins < 1)  return '< 1m';
+  if (totalMins < 60) return totalMins + 'm';
+  var h = Math.floor(totalMins / 60);
+  var m = totalMins % 60;
+  if (h < 24) return h + 'h' + (m > 0 ? ' ' + m + 'm' : '');
+  var d  = Math.floor(h / 24);
+  var hr = h % 24;
+  return d + 'd' + (hr > 0 ? ' ' + hr + 'h' : '');
+}
+
+function formatFmr(mins) {
+  if (mins == null || isNaN(mins)) return '—';
+  var m = Math.round(Number(mins));
+  if (m < 60) return m + 'm';
+  var h  = Math.floor(m / 60);
+  var rm = m % 60;
+  return h + 'h' + (rm > 0 ? ' ' + rm + 'm' : '');
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Mock data — flat array with canonical schema
+   (Subjects / types match TAB_FILTERS above exactly)
+══════════════════════════════════════════════════════════════════════ */
+(function buildMock() {
+  function ago(h) { return new Date(Date.now() - h * 3600000).toISOString(); }
+
+  /* ── Flat incident rows ──────────────────────────────────────────── */
+  window._MOCK_ROWS = [
+
+    /* ── EXEC ESCALATIONS (type contains "Exec Escalation", subject has "Email - Fwd" or "Email - Re") */
+    { bug_id:'b/503022341', iem_escalation_number:'70236829', current_assignee_ldap:'bkumar',
+      product_name:'Compute Engine', priority:'P0', customer_name:'FinanceCo',
+      subject:'Email - Fwd: VPC Connectivity Critical Issue',
+      last_update:'Engineering engaged, firewall rules under review.',
+      time_to_first_update_mins:4, resolution_hours:2.3,
+      created_timestamp:ago(2.3), closed_timestamp:null,
+      status:'In Progress', iem_escalation_type:'Exec Escalation' },
+
+    { bug_id:'b/502987654', iem_escalation_number:'70198432', current_assignee_ldap:'pravils',
+      product_name:'BigQuery', priority:'P1', customer_name:'RetailMax',
+      subject:'Email - Re: Data Pipeline Latency — Exec Concern',
+      last_update:'Root cause identified: misconfigured slot reservation.',
+      time_to_first_update_mins:7, resolution_hours:26.1,
+      created_timestamp:ago(26.1), closed_timestamp:null,
+      status:'In Progress', iem_escalation_type:'Exec Escalation' },
+
+    { bug_id:'b/501234567', iem_escalation_number:'69876543', current_assignee_ldap:'pnmuley',
+      product_name:'GKE', priority:'P0', customer_name:'CloudBank',
+      subject:'Email - Fwd: GKE Cluster Down — Exec Alert',
+      last_update:'Cluster nodes restarted. Monitoring stability.',
+      time_to_first_update_mins:12, resolution_hours:50.5,
+      created_timestamp:ago(50.5), closed_timestamp:ago(2),
+      status:'Closed', iem_escalation_type:'Exec Escalation' },
+
+    { bug_id:'b/500876543', iem_escalation_number:'69654321', current_assignee_ldap:'bensona',
+      product_name:'Pub/Sub', priority:'P1', customer_name:'StreamCorp',
+      subject:'Email - Re: Pub/Sub Throughput Degradation',
+      last_update:'Throughput restored. Post-mortem scheduled.',
+      time_to_first_update_mins:3, resolution_hours:98.2,
+      created_timestamp:ago(98.2), closed_timestamp:ago(4),
+      status:'Closed', iem_escalation_type:'Exec Escalation' },
+
+    { bug_id:'b/499654321', iem_escalation_number:'68765432', current_assignee_ldap:'saurabm',
+      product_name:'Cloud Run', priority:'P0', customer_name:'HealthTech',
+      subject:'Email - Fwd: Cloud Run Outage — CEO Escalation',
+      last_update:'Traffic shifted to backup region. Recovery ongoing.',
+      time_to_first_update_mins:6, resolution_hours:144.0,
+      created_timestamp:ago(144.0), closed_timestamp:ago(96),
+      status:'Closed', iem_escalation_type:'Exec Escalation' },
+
+    /* ── MCS (subject contains "MCS SF PROD") */
+    { bug_id:'b/503290123', iem_escalation_number:'70401234', current_assignee_ldap:'rahulv',
+      product_name:'Networking', priority:'P0', customer_name:'TelcoGiant',
+      subject:'MCS SF PROD - Network Degradation Issue',
+      last_update:'Packet loss traced to faulty border router. Rerouting.',
+      time_to_first_update_mins:5, resolution_hours:3.2,
+      created_timestamp:ago(3.2), closed_timestamp:null,
+      status:'In Progress', iem_escalation_type:'MCS Escalation' },
+
+    { bug_id:'b/503045678', iem_escalation_number:'70267890', current_assignee_ldap:'priyas',
+      product_name:'Cloud Storage', priority:'P1', customer_name:'CloudBank',
+      subject:'MCS SF PROD - Storage Latency Spike',
+      last_update:'GCS backend hotspot identified. Mitigation applied.',
+      time_to_first_update_mins:11, resolution_hours:45.7,
+      created_timestamp:ago(45.7), closed_timestamp:null,
+      status:'In Progress', iem_escalation_type:'MCS Escalation' },
+
+    { bug_id:'b/501789012', iem_escalation_number:'70012345', current_assignee_ldap:'arunk',
+      product_name:'IAM', priority:'P1', customer_name:'SecureCo',
+      subject:'MCS SF PROD - IAM Access Revocation Failure',
+      last_update:'Policy propagation lag resolved. Access restored.',
+      time_to_first_update_mins:8, resolution_hours:120.3,
+      created_timestamp:ago(120.3), closed_timestamp:ago(24),
+      status:'Closed', iem_escalation_type:'MCS Escalation' },
+
+    { bug_id:'b/499456789', iem_escalation_number:'68901234', current_assignee_ldap:'rahulv',
+      product_name:'VPC', priority:'P0', customer_name:'EnterpriseNet',
+      subject:'MCS SF PROD - VPC Connectivity Failure',
+      last_update:'Cross-region VPC peering restored after BGP reset.',
+      time_to_first_update_mins:9, resolution_hours:215.0,
+      created_timestamp:ago(215.0), closed_timestamp:ago(168),
+      status:'Closed', iem_escalation_type:'MCS Escalation' },
+
+    /* ── CUF P0/P1 (subject contains "CUF - Account team" or "CUF - other") */
+    { bug_id:'b/503156789', iem_escalation_number:'70312456', current_assignee_ldap:'likithak',
+      product_name:'App Engine', priority:'P0', customer_name:'HealthTech',
+      subject:'CUF - Account team: App Engine Deployment Failure',
+      last_update:'Deployment rollback initiated. Service recovering.',
+      time_to_first_update_mins:6, resolution_hours:1.5,
+      created_timestamp:ago(1.5), closed_timestamp:null,
+      status:'In Progress', iem_escalation_type:'CUF Escalation' },
+
+    { bug_id:'b/502876543', iem_escalation_number:'70087654', current_assignee_ldap:'aminishar',
+      product_name:'Compute Engine', priority:'P0', customer_name:'GlobalRetail',
+      subject:'CUF - other: Compute Global Impact Incident',
+      last_update:'Live migration in progress for affected VMs.',
+      time_to_first_update_mins:4, resolution_hours:10.2,
+      created_timestamp:ago(10.2), closed_timestamp:null,
+      status:'In Progress', iem_escalation_type:'CUF Escalation' },
+
+    { bug_id:'b/501567890', iem_escalation_number:'69923456', current_assignee_ldap:'likithak',
+      product_name:'Spanner', priority:'P1', customer_name:'BankGroup',
+      subject:'CUF - Account team: Spanner Replication Lag',
+      last_update:'Replication lag reduced to < 2s. Monitoring.',
+      time_to_first_update_mins:9, resolution_hours:147.0,
+      created_timestamp:ago(147.0), closed_timestamp:ago(72),
+      status:'Closed', iem_escalation_type:'CUF Escalation' },
+
+    { bug_id:'b/500345678', iem_escalation_number:'69701234', current_assignee_ldap:'bkumar',
+      product_name:'Networking', priority:'P0', customer_name:'EuroBank',
+      subject:'CUF - other: EU-WEST1 Networking Degradation',
+      last_update:'Traffic engineering change applied. Packet loss resolved.',
+      time_to_first_update_mins:7, resolution_hours:190.5,
+      created_timestamp:ago(190.5), closed_timestamp:ago(144),
+      status:'Closed', iem_escalation_type:'CUF Escalation' },
+
+    /* ── CUF gUP (subject contains "CUF - gUp") */
+    { bug_id:'b/503401234', iem_escalation_number:'70523456', current_assignee_ldap:'meeran',
+      product_name:'Google Workspace', priority:'P1', customer_name:'EduOrg',
+      subject:'CUF - gUp: Workspace Login Failure',
+      last_update:'SSO configuration corrected. Login restored.',
+      time_to_first_update_mins:3, resolution_hours:4.1,
+      created_timestamp:ago(4.1), closed_timestamp:null,
+      status:'In Progress', iem_escalation_type:'CUF Escalation' },
+
+    { bug_id:'b/503167890', iem_escalation_number:'70389012', current_assignee_ldap:'kiranr',
+      product_name:'Google Drive', priority:'P1', customer_name:'MediaHouse',
+      subject:'CUF - gUp: Drive Sync Failure',
+      last_update:'Sync service restarted. Files reconciling.',
+      time_to_first_update_mins:9, resolution_hours:72.6,
+      created_timestamp:ago(72.6), closed_timestamp:ago(24),
+      status:'Closed', iem_escalation_type:'CUF Escalation' },
+
+    { bug_id:'b/501890123', iem_escalation_number:'70123456', current_assignee_ldap:'sureshb',
+      product_name:'Google Meet', priority:'P0', customer_name:'CorpX',
+      subject:'CUF - gUp: Meet Connectivity Issue',
+      last_update:'TURN server configuration updated. Calls stable.',
+      time_to_first_update_mins:6, resolution_hours:168.9,
+      created_timestamp:ago(168.9), closed_timestamp:ago(120),
+      status:'Closed', iem_escalation_type:'CUF Escalation' },
+
+    { bug_id:'b/499567890', iem_escalation_number:'68901244', current_assignee_ldap:'meeran',
+      product_name:'Google Chat', priority:'P1', customer_name:'TechCorp',
+      subject:'CUF - gUp: Chat Outage — Multiple Orgs',
+      last_update:'Chat service fully restored. Incident closed.',
+      time_to_first_update_mins:5, resolution_hours:312.0,
+      created_timestamp:ago(312.0), closed_timestamp:ago(264),
+      status:'Closed', iem_escalation_type:'CUF Escalation' },
+
+    /* ── CUF BILLING (iem_escalation_type = "Billing Related") */
+    { bug_id:'b/503512345', iem_escalation_number:'70634567', current_assignee_ldap:'anitam',
+      product_name:'Billing API', priority:'P0', customer_name:'FinServCo',
+      subject:'Billing - Invoice Discrepancy — FinServCo',
+      last_update:'Overcharge identified. Credit memo being processed.',
+      time_to_first_update_mins:8, resolution_hours:6.5,
+      created_timestamp:ago(6.5), closed_timestamp:null,
+      status:'In Progress', iem_escalation_type:'Billing Related' },
+
+    { bug_id:'b/503278901', iem_escalation_number:'70412345', current_assignee_ldap:'devk',
+      product_name:'Billing Console', priority:'P1', customer_name:'RetailChain',
+      subject:'Billing - Payment Failure — RetailChain',
+      last_update:'Payment gateway timeout. Retry logic enabled.',
+      time_to_first_update_mins:15, resolution_hours:36.2,
+      created_timestamp:ago(36.2), closed_timestamp:null,
+      status:'In Progress', iem_escalation_type:'Billing Related' },
+
+    { bug_id:'b/501923456', iem_escalation_number:'70234567', current_assignee_ldap:'yasht',
+      product_name:'Billing', priority:'P1', customer_name:'InsuranceCo',
+      subject:'Billing - Credit Adjustment Delayed — InsuranceCo',
+      last_update:'Credit adjustment processed. Customer notified.',
+      time_to_first_update_mins:5, resolution_hours:192.1,
+      created_timestamp:ago(192.1), closed_timestamp:ago(144),
+      status:'Closed', iem_escalation_type:'Billing Related' },
+
+    { bug_id:'b/499678901', iem_escalation_number:'69012345', current_assignee_ldap:'anitam',
+      product_name:'Billing', priority:'P0', customer_name:'FinServCo',
+      subject:'Billing - Quota Charge Error — FinServCo',
+      last_update:'Quota billing bug fixed in backend. Refund issued.',
+      time_to_first_update_mins:11, resolution_hours:480.0,
+      created_timestamp:ago(480.0), closed_timestamp:ago(432),
+      status:'Closed', iem_escalation_type:'Billing Related' },
+
+    /* ── SOCIAL CARE (iem_escalation_type contains "Social Care") */
+    { bug_id:'b/503623456', iem_escalation_number:'70745678', current_assignee_ldap:'riyap',
+      product_name:'Cloud Platform', priority:'P1', customer_name:'BrandCo',
+      subject:'Social Care - Twitter Complaint — BrandCo',
+      last_update:'Public response drafted. Awaiting legal approval.',
+      time_to_first_update_mins:2, resolution_hours:8.3,
+      created_timestamp:ago(8.3), closed_timestamp:null,
+      status:'In Progress', iem_escalation_type:'Social Care Escalation' },
+
+    { bug_id:'b/503389012', iem_escalation_number:'70512345', current_assignee_ldap:'aisham',
+      product_name:'Cloud Run', priority:'P1', customer_name:'MediaBrand',
+      subject:'Social Care - LinkedIn Escalation — MediaBrand',
+      last_update:'Public post addressed. DM thread opened with customer.',
+      time_to_first_update_mins:7, resolution_hours:96.4,
+      created_timestamp:ago(96.4), closed_timestamp:ago(48),
+      status:'Closed', iem_escalation_type:'Social Care Escalation' },
+
+    { bug_id:'b/502012345', iem_escalation_number:'70345678', current_assignee_ldap:'arjunl',
+      product_name:'GKE', priority:'P0', customer_name:'TechBrand',
+      subject:'Social Care - Reddit Thread — TechBrand Crisis',
+      last_update:'Reddit thread mitigated. PR team engaged.',
+      time_to_first_update_mins:4, resolution_hours:216.7,
+      created_timestamp:ago(216.7), closed_timestamp:ago(168),
+      status:'Closed', iem_escalation_type:'Social Care Escalation' },
+
+    { bug_id:'b/499789012', iem_escalation_number:'69123456', current_assignee_ldap:'riyap',
+      product_name:'Cloud Platform', priority:'P1', customer_name:'MediaBrand',
+      subject:'Social Care - Community Forum — MediaBrand Outage',
+      last_update:'Forum post updated. Incident report published.',
+      time_to_first_update_mins:9, resolution_hours:360.0,
+      created_timestamp:ago(360.0), closed_timestamp:ago(312),
+      status:'Closed', iem_escalation_type:'Social Care Escalation' }
+  ];
+}());
+
+/* ── Monthly analytics (bar chart counts, keyed by filter key) ────── */
+var _MOCK_MONTHLY = {
+  EXEC_ESCALATIONS: [
+    {month:'2025-05',count:8},  {month:'2025-06',count:12},
+    {month:'2025-07',count:9},  {month:'2025-08',count:15},
+    {month:'2025-09',count:11}, {month:'2025-10',count:14},
+    {month:'2025-11',count:10}, {month:'2025-12',count:7},
+    {month:'2026-01',count:13}, {month:'2026-02',count:16},
+    {month:'2026-03',count:11}, {month:'2026-04',count:8}
+  ],
+  MCS: [
+    {month:'2025-05',count:6},  {month:'2025-06',count:9},
+    {month:'2025-07',count:7},  {month:'2025-08',count:10},
+    {month:'2025-09',count:8},  {month:'2025-10',count:11},
+    {month:'2025-11',count:6},  {month:'2025-12',count:5},
+    {month:'2026-01',count:9},  {month:'2026-02',count:13},
+    {month:'2026-03',count:8},  {month:'2026-04',count:6}
+  ],
+  CUF_P0_P1: [
+    {month:'2025-05',count:5},  {month:'2025-06',count:8},
+    {month:'2025-07',count:6},  {month:'2025-08',count:11},
+    {month:'2025-09',count:7},  {month:'2025-10',count:9},
+    {month:'2025-11',count:8},  {month:'2025-12',count:4},
+    {month:'2026-01',count:10}, {month:'2026-02',count:12},
+    {month:'2026-03',count:7},  {month:'2026-04',count:5}
+  ],
+  CUF_GUP: [
+    {month:'2025-05',count:4},  {month:'2025-06',count:7},
+    {month:'2025-07',count:5},  {month:'2025-08',count:9},
+    {month:'2025-09',count:6},  {month:'2025-10',count:8},
+    {month:'2025-11',count:5},  {month:'2025-12',count:3},
+    {month:'2026-01',count:7},  {month:'2026-02',count:10},
+    {month:'2026-03',count:6},  {month:'2026-04',count:4}
+  ],
+  CUF_BILLING: [
+    {month:'2025-05',count:3},  {month:'2025-06',count:5},
+    {month:'2025-07',count:4},  {month:'2025-08',count:7},
+    {month:'2025-09',count:5},  {month:'2025-10',count:6},
+    {month:'2025-11',count:4},  {month:'2025-12',count:2},
+    {month:'2026-01',count:6},  {month:'2026-02',count:8},
+    {month:'2026-03',count:5},  {month:'2026-04',count:3}
+  ],
+  SOCIAL_CARE: [
+    {month:'2025-05',count:7},  {month:'2025-06',count:11},
+    {month:'2025-07',count:8},  {month:'2025-08',count:13},
+    {month:'2025-09',count:9},  {month:'2025-10',count:12},
+    {month:'2025-11',count:7},  {month:'2025-12',count:6},
+    {month:'2026-01',count:10}, {month:'2026-02',count:14},
+    {month:'2026-03',count:9},  {month:'2026-04',count:7}
+  ]
+};
+
+/* ── Raw analytics table data (keyed by filter key) ──────────────── */
+var _MOCK_RAW = {
+  EXEC_ESCALATIONS: [
+    {month:'2026-04',bugId:'b/503022341',escalation:'70236829',subject:'Email - Fwd: VPC Connectivity Critical',          created:'2026-04-15 12:36',firstAssign:'2026-04-15 12:41',firstUpdate:'2026-04-15 12:47'},
+    {month:'2026-04',bugId:'b/502987654',escalation:'70198432',subject:'Email - Re: Data Pipeline Latency Exec Concern',   created:'2026-04-12 09:15',firstAssign:'2026-04-12 09:22',firstUpdate:'2026-04-12 09:33'},
+    {month:'2026-03',bugId:'b/501234567',escalation:'69876543',subject:'Email - Fwd: GKE Cluster Down Exec Alert',          created:'2026-03-28 14:22',firstAssign:'2026-03-28 14:31',firstUpdate:'2026-03-28 14:42'},
+    {month:'2026-03',bugId:'b/500876543',escalation:'69654321',subject:'Email - Re: Pub/Sub Throughput Degradation',        created:'2026-03-15 11:05',firstAssign:'2026-03-15 11:12',firstUpdate:'2026-03-15 11:24'},
+    {month:'2026-02',bugId:'b/499654321',escalation:'68765432',subject:'Email - Fwd: Cloud Run Outage CEO Escalation',      created:'2026-02-22 16:47',firstAssign:'2026-02-22 17:01',firstUpdate:'2026-02-22 17:14'}
+  ],
+  MCS: [
+    {month:'2026-04',bugId:'b/503290123',escalation:'70401234',subject:'MCS SF PROD - Network Degradation TelcoGiant',     created:'2026-04-20 09:11',firstAssign:'2026-04-20 09:18',firstUpdate:'2026-04-20 09:29'},
+    {month:'2026-04',bugId:'b/503045678',escalation:'70267890',subject:'MCS SF PROD - Storage Latency Spike',              created:'2026-04-08 14:37',firstAssign:'2026-04-08 14:49',firstUpdate:'2026-04-08 15:03'},
+    {month:'2026-03',bugId:'b/501789012',escalation:'70012345',subject:'MCS SF PROD - IAM Access Revocation Failure',       created:'2026-03-19 11:24',firstAssign:'2026-03-19 11:35',firstUpdate:'2026-03-19 11:48'},
+    {month:'2026-02',bugId:'b/499456789',escalation:'68901234',subject:'MCS SF PROD - VPC Connectivity Failure',            created:'2026-02-15 08:52',firstAssign:'2026-02-15 09:04',firstUpdate:'2026-02-15 09:19'}
+  ],
+  CUF_P0_P1: [
+    {month:'2026-04',bugId:'b/503156789',escalation:'70312456',subject:'CUF - Account team: App Engine Deployment Failure', created:'2026-04-18 10:22',firstAssign:'2026-04-18 10:35',firstUpdate:'2026-04-18 10:47'},
+    {month:'2026-04',bugId:'b/502876543',escalation:'70087654',subject:'CUF - other: Compute Global Impact Incident',       created:'2026-04-10 07:45',firstAssign:'2026-04-10 07:51',firstUpdate:'2026-04-10 08:05'},
+    {month:'2026-03',bugId:'b/501567890',escalation:'69923456',subject:'CUF - Account team: Spanner Replication Lag',       created:'2026-03-25 13:18',firstAssign:'2026-03-25 13:24',firstUpdate:'2026-03-25 13:41'},
+    {month:'2026-03',bugId:'b/500345678',escalation:'69701234',subject:'CUF - other: EU-WEST1 Networking Degradation',      created:'2026-03-12 09:33',firstAssign:'2026-03-12 09:39',firstUpdate:'2026-03-12 09:52'}
+  ],
+  CUF_GUP: [
+    {month:'2026-04',bugId:'b/503401234',escalation:'70523456',subject:'CUF - gUp: Workspace Login Failure',               created:'2026-04-22 08:15',firstAssign:'2026-04-22 08:21',firstUpdate:'2026-04-22 08:34'},
+    {month:'2026-04',bugId:'b/503167890',escalation:'70389012',subject:'CUF - gUp: Drive Sync Failure MediaHouse',         created:'2026-04-11 13:42',firstAssign:'2026-04-11 13:53',firstUpdate:'2026-04-11 14:07'},
+    {month:'2026-03',bugId:'b/501890123',escalation:'70123456',subject:'CUF - gUp: Meet Connectivity Issue',               created:'2026-03-21 10:19',firstAssign:'2026-03-21 10:29',firstUpdate:'2026-03-21 10:43'}
+  ],
+  CUF_BILLING: [
+    {month:'2026-04',bugId:'b/503512345',escalation:'70634567',subject:'Billing - Invoice Discrepancy FinServCo',           created:'2026-04-24 10:08',firstAssign:'2026-04-24 10:19',firstUpdate:'2026-04-24 10:32'},
+    {month:'2026-03',bugId:'b/501923456',escalation:'70234567',subject:'Billing - Credit Adjustment RetailChain',           created:'2026-03-17 14:55',firstAssign:'2026-03-17 15:08',firstUpdate:'2026-03-17 15:23'},
+    {month:'2026-02',bugId:'b/499678901',escalation:'69012345',subject:'Billing - Quota Charge Error FinServCo',            created:'2026-02-20 09:41',firstAssign:'2026-02-20 09:52',firstUpdate:'2026-02-20 10:07'}
+  ],
+  SOCIAL_CARE: [
+    {month:'2026-04',bugId:'b/503623456',escalation:'70745678',subject:'Social Care - Twitter Complaint BrandCo',           created:'2026-04-25 11:15',firstAssign:'2026-04-25 11:18',firstUpdate:'2026-04-25 11:26'},
+    {month:'2026-04',bugId:'b/503389012',escalation:'70512345',subject:'Social Care - LinkedIn Escalation MediaBrand',      created:'2026-04-14 16:28',firstAssign:'2026-04-14 16:36',firstUpdate:'2026-04-14 16:48'},
+    {month:'2026-03',bugId:'b/502012345',escalation:'70345678',subject:'Social Care - Reddit Thread TechBrand Crisis',      created:'2026-03-23 08:44',firstAssign:'2026-03-23 08:50',firstUpdate:'2026-03-23 09:02'}
+  ]
+};
+
+/* ── Mock comms log (keyed by bug_id) ────────────────────────────── */
+var _MOCK_COMMS = {
+  'b/503022341': [
+    { timestamp:new Date(Date.now()-7200000).toISOString(), author:'bkumar',    message:'Escalation received. Engaging VPC networking team.',                    audience:'IEM' },
+    { timestamp:new Date(Date.now()-5400000).toISOString(), author:'bkumar',    message:'Firewall rule review in progress. ETA 30 minutes.',                    audience:'IEM' },
+    { timestamp:new Date(Date.now()-3600000).toISOString(), author:'rahulv',    message:'Root cause: overly restrictive egress rule pushed via Terraform. Rollback initiated.', audience:'Executive' },
+    { timestamp:new Date(Date.now()- 900000).toISOString(), author:'bkumar',    message:'VPC connectivity restored. Monitoring for recurrence.',                audience:'Executive' }
+  ],
+  'b/503290123': [
+    { timestamp:new Date(Date.now()-5400000).toISOString(), author:'rahulv',    message:'MCS SF PROD ticket opened. Engaging network SRE.',                     audience:'IEM' },
+    { timestamp:new Date(Date.now()-3600000).toISOString(), author:'rahulv',    message:'Packet loss traced to border router BGP flap. Rerouting traffic.',     audience:'IEM' },
+    { timestamp:new Date(Date.now()- 900000).toISOString(), author:'priyas',    message:'Traffic rerouted. Packet loss < 0.1%. Monitoring.',                   audience:'Executive' }
+  ],
+  'b/503156789': [
+    { timestamp:new Date(Date.now()-5400000).toISOString(), author:'likithak',  message:'CUF escalation opened. Deployment failure on App Engine Flex.',        audience:'IEM' },
+    { timestamp:new Date(Date.now()-3000000).toISOString(), author:'likithak',  message:'Rollback to previous version initiated.',                               audience:'IEM' },
+    { timestamp:new Date(Date.now()- 900000).toISOString(), author:'aminishar', message:'Service restored. Root cause: incompatible runtime config.',            audience:'Executive' }
+  ]
+};
+
+/* ══════════════════════════════════════════════════════════════════════
+   Hook: useDashboardData
+   subscribe(eventName, fn) → unsubscribeFn
+   Events: 'change' → fn(data)  |  'error' → fn(errorObj)
+══════════════════════════════════════════════════════════════════════ */
+var useDashboardData = (function () {
+  var _subs = {};
+  var _data = null;
+
+  function _emit(ev, payload) {
+    (_subs[ev] || []).forEach(function (fn) { try { fn(payload); } catch (e) { console.error(e); } });
+  }
+
+  function subscribe(ev, fn) {
+    if (!_subs[ev]) _subs[ev] = [];
+    _subs[ev].push(fn);
+    if (ev === 'change' && _data) fn(_data);   // replay last value
+    return function () {
+      _subs[ev] = (_subs[ev] || []).filter(function (f) { return f !== fn; });
+    };
+  }
+
+  /* ── Fetch strategies ──────────────────────────────────────────── */
+  function fetch() {
+    switch (DATA_ENDPOINT.type) {
+
+      case 'gas':
+        if (typeof google !== 'undefined' && google.script) {
+          google.script.run
+            .withSuccessHandler(function (d) { _data = _normaliseGas(d); _emit('change', _data); })
+            .withFailureHandler(function (e) { _emit('error', e); })
+            .getDashboardData();
+        }
+        break;
+
+      case 'rest':
+        window.fetch(DATA_ENDPOINT.baseUrl + '/incidents', {
+          headers: Object.assign({ 'Content-Type': 'application/json' }, DATA_ENDPOINT.headers)
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) { _data = _normaliseRest(d); _emit('change', _data); })
+          .catch(function (e) { _emit('error', e); });
+        break;
+
+      case 'graphql':
+        window.fetch(DATA_ENDPOINT.graphqlUrl, {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, DATA_ENDPOINT.headers),
+          body: JSON.stringify({ query: '{ incidents { bug_id iem_escalation_number current_assignee_ldap product_name priority customer_name subject last_update time_to_first_update_mins resolution_hours created_timestamp closed_timestamp status iem_escalation_type } }' })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) { _data = _normaliseGraphql(d.data); _emit('change', _data); })
+          .catch(function (e) { _emit('error', e); });
+        break;
+
+      case 'mock':
+      default:
+        setTimeout(function () {
+          _data = { rows: window._MOCK_ROWS, monthly: _MOCK_MONTHLY, raw: _MOCK_RAW };
+          _emit('change', _data);
+        }, 600);
+        break;
+    }
+  }
+
+  function fetchCommsLog(bugId, cb) {
+    switch (DATA_ENDPOINT.type) {
+      case 'gas':
+        if (typeof google !== 'undefined' && google.script) {
+          google.script.run
+            .withSuccessHandler(cb)
+            .withFailureHandler(function () { cb([]); })
+            .getCommunicationLog(bugId);
+        }
+        break;
+      case 'rest':
+        window.fetch(DATA_ENDPOINT.baseUrl + '/comms/' + encodeURIComponent(bugId), {
+          headers: DATA_ENDPOINT.headers
+        })
+          .then(function (r) { return r.json(); })
+          .then(cb)
+          .catch(function () { cb([]); });
+        break;
+      default:
+        setTimeout(function () { cb(_MOCK_COMMS[bugId] || _buildFallbackLog()); }, 300);
+        break;
+    }
+  }
+
+  /* ── Normalisers ──────────────────────────────────────────────── */
+  function _normaliseGas(d) {
+    var rows = (d.incidents || []).map(function (inc) {
+      return {
+        bug_id:                    inc.bug_id                    || inc.id          || '',
+        iem_escalation_number:     inc.iem_escalation_number     || inc.ticketId    || '',
+        current_assignee_ldap:     inc.current_assignee_ldap     || inc.requestingPoc || '',
+        product_name:              inc.product_name              || inc.productArea  || '',
+        priority:                  inc.priority                  || inc.severity    || '',
+        customer_name:             inc.customer_name             || inc.customerName || '',
+        subject:                   inc.subject                   || '',
+        last_update:               inc.last_update               || '',
+        time_to_first_update_mins: inc.time_to_first_update_mins != null ? inc.time_to_first_update_mins : (parseInt(inc.fmr) || 0),
+        resolution_hours:          inc.resolution_hours          != null ? inc.resolution_hours : 0,
+        created_timestamp:         inc.created_timestamp         || inc.createdAt   || null,
+        closed_timestamp:          inc.closed_timestamp          || null,
+        status:                    inc.status                    || '',
+        iem_escalation_type:       inc.iem_escalation_type       || ''
+      };
+    });
+    return { rows: rows, monthly: _MOCK_MONTHLY, raw: _MOCK_RAW };
+  }
+
+  function _normaliseRest(d) {
+    return {
+      rows:    d.incidents || d.data || [],
+      monthly: d.monthly   || _MOCK_MONTHLY,
+      raw:     d.raw       || _MOCK_RAW
+    };
+  }
+
+  function _normaliseGraphql(d) {
+    return { rows: d.incidents || [], monthly: _MOCK_MONTHLY, raw: _MOCK_RAW };
+  }
+
+  function _buildFallbackLog() {
+    var now = Date.now();
+    return [
+      { timestamp:new Date(now-7200000).toISOString(), author:'system-bot',   message:'Incident opened. Initial triage in progress.',      audience:'IEM' },
+      { timestamp:new Date(now-5400000).toISOString(), author:'IEM Desk',     message:'Comms bridge established. Stakeholders notified.',  audience:'Executive' },
+      { timestamp:new Date(now-3600000).toISOString(), author:'MIM-ADMIN-01', message:'Root cause identified. Mitigation underway.',       audience:'IEM' },
+      { timestamp:new Date(now- 900000).toISOString(), author:'MIM-ADMIN-01', message:'Mitigation 80% complete. Monitoring for recovery.', audience:'Executive' }
+    ];
+  }
+
+  return { subscribe: subscribe, fetch: fetch, fetchCommsLog: fetchCommsLog };
+}());
+
+/* ══════════════════════════════════════════════════════════════════════
+   Hook: useCurrentUser
+   subscribe(fn) → unsubscribeFn
+   fn called with { name, initials }
+══════════════════════════════════════════════════════════════════════ */
+var useCurrentUser = (function () {
+  var _subs = [];
+  var _user = null;
+
+  function subscribe(fn) {
+    _subs.push(fn);
+    if (_user) fn(_user);
+    return function () { _subs = _subs.filter(function (f) { return f !== fn; }); };
+  }
+
+  function _emit(u) {
+    _user = u;
+    _subs.forEach(function (fn) { try { fn(u); } catch (e) { console.error(e); } });
+  }
+
+  function fetch() {
+    // Priority 1: GAS server-side template var (fastest, no round-trip)
+    var gasName = (typeof GAS_USER_NAME !== 'undefined' && GAS_USER_NAME &&
+                   GAS_USER_NAME.indexOf('<?') === -1)
+                ? GAS_USER_NAME.trim() : '';
+    if (gasName) { _emit(_buildUser(gasName)); return; }
+
+    // Priority 2: GAS getCurrentUser() RPC
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (u) { _emit(u || { name:'IEM Admin', initials:'IA' }); })
+        .withFailureHandler(function ()   { _emit({ name:'IEM Admin', initials:'IA' }); })
+        .getCurrentUser();
+      return;
+    }
+
+    // Priority 3: local dev fallback
+    _emit({ name:'IEM Admin', initials:'IA' });
+  }
+
+  function _buildUser(name) {
+    var parts    = name.trim().split(/\s+/).filter(Boolean);
+    var initials = parts.length >= 2
+      ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+      : name.slice(0, 2).toUpperCase();
+    return { name: name, initials: initials };
+  }
+
+  return { subscribe: subscribe, fetch: fetch };
+}());
+
+/* ══════════════════════════════════════════════════════════════════════
+   Hook: useNotifications
+   Items carry incidentId + tabKey for deep-link navigation.
+   Clicking a notification opens the comms/details panel for that incident.
+══════════════════════════════════════════════════════════════════════ */
+var useNotifications = (function () {
+  var _subs  = [];
+  var _items = [
+    { id:'n1', read:false,
+      bugId:'b/503022341', incidentId:'b/503022341', tabKey:'EXEC_ESCALATIONS',
+      title:'New EXEC: Email - Fwd VPC Connectivity',
+      body:'FinanceCo (P0) — Engineering engaged, firewall rules under review.',
+      ts: new Date(Date.now() -   300000).toISOString() },
+    { id:'n2', read:false,
+      bugId:'b/503290123', incidentId:'b/503290123', tabKey:'MCS',
+      title:'MCS SF PROD: Network Degradation',
+      body:'TelcoGiant Platinum — packet loss on border router rerouting.',
+      ts: new Date(Date.now() -   900000).toISOString() },
+    { id:'n3', read:false,
+      bugId:'b/503156789', incidentId:'b/503156789', tabKey:'CUF_P0_P1',
+      title:'CUF P0: App Engine Deployment Failure',
+      body:'HealthTech — App Engine Flex rollback in progress.',
+      ts: new Date(Date.now() -  1800000).toISOString() },
+    { id:'n4', read:true,
+      bugId:'b/503512345', incidentId:'b/503512345', tabKey:'CUF_BILLING',
+      title:'Billing P0: Invoice Discrepancy — FinServCo',
+      body:'Credit memo being processed. Overcharge identified.',
+      ts: new Date(Date.now() -  7200000).toISOString() },
+    { id:'n5', read:true,
+      bugId:'b/503623456', incidentId:'b/503623456', tabKey:'SOCIAL_CARE',
+      title:'Social Care: Twitter Complaint — BrandCo',
+      body:'Public response pending legal approval.',
+      ts: new Date(Date.now() - 14400000).toISOString() }
+  ];
+
+  function _emit() {
+    var snap = _items.slice();
+    _subs.forEach(function (fn) { try { fn(snap); } catch (e) { console.error(e); } });
+  }
+
+  function subscribe(fn) {
+    _subs.push(fn);
+    fn(_items.slice());
+    return function () { _subs = _subs.filter(function (f) { return f !== fn; }); };
+  }
+
+  function markRead(id) {
+    _items = _items.map(function (n) {
+      return n.id === id ? Object.assign({}, n, { read: true }) : n;
+    });
+    _emit();
+  }
+
+  function markAllRead() {
+    _items = _items.map(function (n) { return Object.assign({}, n, { read: true }); });
+    _emit();
+  }
+
+  function getItem(id) {
+    return _items.filter(function (n) { return n.id === id; })[0] || null;
+  }
+
+  function init() { _emit(); }
+
+  return { subscribe: subscribe, markRead: markRead, markAllRead: markAllRead, getItem: getItem, init: init };
+}());
+</script>

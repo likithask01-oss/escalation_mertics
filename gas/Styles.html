@@ -1028,4 +1028,188 @@ body {
   font-weight: 400;
   margin-top: 1px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   NEW STYLES — CUF sub-tab bar, sortable/filterable column headers,
+   column filter popup
+══════════════════════════════════════════════════════════════════════ */
+
+/* ── CUF sub-tab bar ──────────────────────────────────────────────────── */
+.subtabbar {
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.subtabbar::-webkit-scrollbar { display: none; }
+.subtab {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px 18px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  position: relative;
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+.subtab:hover { color: var(--text-primary); }
+.subtab:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+.subtab.active { color: var(--accent-blue); }
+.subtab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0; height: 2px;
+  background: var(--accent-blue);
+  border-radius: 2px 2px 0 0;
+}
+.theme-light .subtab.active { color: #2563eb; }
+.theme-light .subtab.active::after { background: #2563eb; }
+
+/* ── Sortable/filterable column header layout ─────────────────────────── */
+.th-col {
+  padding: 8px 10px !important;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.th-inner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.th-label {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex: 1;
+  white-space: nowrap;
+}
+.th-btns {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* ── Sort button ──────────────────────────────────────────────────────── */
+.th-sort-btn {
+  background: none;
+  border: none;
+  padding: 2px 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  transition: background 0.12s, color 0.12s;
+  line-height: 0;
+}
+.th-sort-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.th-sort-btn:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 1px; }
+
+/* Sort icon visibility states — only show the relevant chevron */
+.th-sort-btn .ic-sort-asc,
+.th-sort-btn .ic-sort-desc  { display: none; }
+.th-sort-btn .ic-sort-un    { display: block; }
+
+.th-sort-btn.s-asc .ic-sort-un,
+.th-sort-btn.s-asc .ic-sort-desc   { display: none; }
+.th-sort-btn.s-asc .ic-sort-asc    { display: block; color: var(--accent-blue); }
+
+.th-sort-btn.s-desc .ic-sort-un,
+.th-sort-btn.s-desc .ic-sort-asc   { display: none; }
+.th-sort-btn.s-desc .ic-sort-desc  { display: block; color: var(--accent-blue); }
+
+/* ── Filter (funnel) button ───────────────────────────────────────────── */
+.th-filter-btn {
+  background: none;
+  border: none;
+  padding: 2px 3px;
+  border-radius: 3px;
+  cursor: pointer;
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  transition: background 0.12s, color 0.12s;
+  line-height: 0;
+}
+.th-filter-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.th-filter-btn:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 1px; }
+.th-filter-btn.f-active .ic-filter { color: var(--accent-blue); fill: rgba(59,130,246,0.25); }
+.theme-light .th-filter-btn.f-active .ic-filter { color: #2563eb; fill: rgba(37,99,235,0.15); }
+
+/* ── Column filter popup (shared, position:fixed) ─────────────────────── */
+.col-filter-popup {
+  position: fixed;
+  z-index: 200;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: var(--shadow);
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 200px;
+  animation: slide-up 0.12s ease;
+}
+.col-filter-text {
+  flex: 1;
+  padding: 5px 9px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-size: 0.72rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.col-filter-text::placeholder { color: var(--text-faint); }
+.col-filter-text:focus { border-color: var(--accent-blue); background: var(--bg-base); }
+.theme-light .col-filter-text:focus { background: #fff; }
+.col-filter-clear-btn {
+  padding: 5px 9px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+.col-filter-clear-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ── Truncated table cells for long text ──────────────────────────────── */
+.td-subject,
+.td-update {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.td-update { color: var(--text-muted); font-style: italic; }
+
+/* ── Bug ID link style inside table ──────────────────────────────────── */
+.rd-id {
+  color: var(--accent-blue);
+  text-decoration: none;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.72rem;
+}
+.rd-id:hover { text-decoration: underline; }
+.theme-light .rd-id { color: #2563eb; }
 </style>

@@ -6,7 +6,7 @@
   <title>IEM Escalations Dashboard</title>
   <?!= include('Styles') ?>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-  <!-- GAS template vars — evaluated server-side; read as literal strings in local browser preview -->
+  <!-- GAS template vars — evaluated server-side; literal strings in local browser preview -->
   <script>var GAS_LOGO_URL='<?= logoUrl ?>',GAS_USER_NAME='<?= userName ?>';</script>
 </head>
 <body class="theme-dark" data-theme="dark">
@@ -50,14 +50,19 @@
     </div>
   </nav>
 
-  <!-- ── TAB BAR ───────────────────────────────────────────────────────── -->
+  <!-- ── MAIN TAB BAR (4 tabs) ─────────────────────────────────────────── -->
   <div class="tabbar" role="tablist" aria-label="Escalation categories">
-    <button class="tab active" role="tab" aria-selected="true"  data-tab="EXEC_ESCALATIONS"       id="tab-EXEC">EXEC Escalations</button>
-    <button class="tab"        role="tab" aria-selected="false" data-tab="P0_P1_ESCALATION"        id="tab-P0P1">P0/P1 Escalation</button>
-    <button class="tab"        role="tab" aria-selected="false" data-tab="MCS"                     id="tab-MCS">MCS</button>
-    <button class="tab"        role="tab" aria-selected="false" data-tab="GUP_ESCALATION"          id="tab-GUP">gUP Escalation</button>
-    <button class="tab"        role="tab" aria-selected="false" data-tab="BILLING_ESCALATION"      id="tab-BIL">Billing Escalation</button>
-    <button class="tab"        role="tab" aria-selected="false" data-tab="SOCIAL_CARE_ESCALATION"  id="tab-SOC">Social Care Escalation</button>
+    <button class="tab active" role="tab" aria-selected="true"  data-tab="EXEC_ESCALATIONS" id="tab-EXEC">Exec Escalations</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="MCS"               id="tab-MCS">MCS</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="CUF_ESCALATIONS"   id="tab-CUF">CUF Escalations</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="SOCIAL_CARE"       id="tab-SOC">Social Care Escalation</button>
+  </div>
+
+  <!-- ── CUF SUB-TAB BAR (visible only when CUF tab is active) ─────────── -->
+  <div class="subtabbar" id="cufSubTabBar" style="display:none" role="tablist" aria-label="CUF sub-categories">
+    <button class="subtab active" role="tab" aria-selected="true"  data-cuf="CUF_P0_P1"   >P0 / P1</button>
+    <button class="subtab"        role="tab" aria-selected="false" data-cuf="CUF_GUP"     >gUP</button>
+    <button class="subtab"        role="tab" aria-selected="false" data-cuf="CUF_BILLING" >Billing</button>
   </div>
 
   <!-- ── MAIN ──────────────────────────────────────────────────────────── -->
@@ -96,41 +101,8 @@
         </div>
         <div class="table-wrap">
           <table class="incident-table" id="liveEscTable" aria-label="Live escalations">
-            <thead>
-              <tr>
-                <th class="th-filterable">
-                  <span class="th-label">Requesting POC</span>
-                  <input type="text" class="col-filter" data-col="requestingPoc" placeholder="Filter…" aria-label="Filter Requesting POC">
-                </th>
-                <th class="th-filterable">
-                  <span class="th-label">IEM Bug ID / Vector Case</span>
-                  <input type="text" class="col-filter" data-col="ticketId" placeholder="Filter…" aria-label="Filter Bug ID">
-                </th>
-                <th class="th-filterable">
-                  <span class="th-label">Product / Product Area</span>
-                  <input type="text" class="col-filter" data-col="productArea" placeholder="Filter…" aria-label="Filter Product">
-                </th>
-                <th class="th-filterable">
-                  <span class="th-label">Status</span>
-                  <input type="text" class="col-filter" data-col="status" placeholder="Filter…" aria-label="Filter Status">
-                </th>
-                <th class="th-filterable">
-                  <span class="th-label">Customer / Service Level</span>
-                  <input type="text" class="col-filter" data-col="customerName" placeholder="Filter…" aria-label="Filter Customer">
-                </th>
-                <th class="text-right">
-                  <span class="th-label">Comms Update</span>
-                </th>
-                <th class="th-filterable">
-                  <span class="th-label">FMR</span>
-                  <input type="text" class="col-filter" data-col="fmr" placeholder="Filter…" aria-label="Filter FMR">
-                </th>
-                <th class="th-filterable">
-                  <span class="th-label">Escalation Age</span>
-                  <input type="text" class="col-filter" data-col="age" placeholder="Filter…" aria-label="Filter Age">
-                </th>
-              </tr>
-            </thead>
+            <!-- thead is populated dynamically by initColumnHeaders() -->
+            <thead><tr id="tableHeaderRow"></tr></thead>
             <tbody id="liveEscTbody"></tbody>
           </table>
         </div>
@@ -144,7 +116,7 @@
         </div>
       </section>
 
-      <!-- Inline comms blast — click outside to collapse -->
+      <!-- Inline comms blast — rendered below table, collapsed by default -->
       <div id="commsPanel"></div>
 
       <!-- ── SECTION 2: PERFORMANCE ANALYTICS ────────────────────────── -->
@@ -170,15 +142,13 @@
           <div class="analytics-left card">
             <div class="analytics-panel-hdr">
               <span class="kpi-tag" id="kpiTag">KR2</span>
-              <span class="analytics-panel-title" id="chartTitle">First Meaningful Update</span>
-              <span class="slo-badge" id="sloSummary"></span>
+              <span class="analytics-panel-title" id="chartTitle">IEM Escalations</span>
             </div>
             <div class="chart-container-wrap">
-              <canvas id="mainChart" aria-label="Dual-axis bar and line chart: ticket count and SLO compliance"></canvas>
+              <canvas id="mainChart" aria-label="Bar chart: IEM escalation count by month"></canvas>
             </div>
             <div class="chart-legend">
               <span class="legend-item"><span class="legend-swatch swatch-bar"></span>Count</span>
-              <span class="legend-item"><span class="legend-swatch swatch-line"></span>SLO Compliance %</span>
             </div>
           </div>
 
@@ -207,6 +177,7 @@
 
         </div>
       </section>
+
     </div><!-- /dashboardContent -->
   </main>
 
@@ -234,9 +205,16 @@
     </div>
   </div>
 
+  <!-- ── SHARED COLUMN FILTER POPUP ────────────────────────────────────── -->
+  <div class="col-filter-popup" id="colFilterPopup" style="display:none" role="dialog" aria-label="Column filter">
+    <input  class="col-filter-text"      id="colFilterInput"    type="text" placeholder="Filter…" aria-label="Filter value" autocomplete="off">
+    <button class="col-filter-clear-btn" id="colFilterClearBtn" type="button">Clear</button>
+  </div>
+
   <!-- ── TOAST ─────────────────────────────────────────────────────────── -->
   <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true" style="display:none"></div>
 
+  <?!= include('Hooks') ?>
   <?!= include('ClientScript') ?>
 </body>
 </html>
