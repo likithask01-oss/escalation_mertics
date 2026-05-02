@@ -210,6 +210,33 @@ function _extractSheetId_(urlOrId) {
   return '';
 }
 
+/**
+ * Called by the inline "Google Sheet URL → Fetch" bar on the frontend.
+ * Temporarily applies sheetId/gid, runs SheetFetchService, and returns
+ * canonical rows so the client can feed them straight into the table.
+ *
+ * @param {string} sheetId
+ * @param {string} gid   numeric GID string, or '' for first sheet
+ * @return {{ok:boolean, rows:Array, _meta:Object, error:string|undefined}}
+ */
+function fetchSheetByUrl(sheetId, gid) {
+  try {
+    if (!sheetId) throw new Error('No Sheet ID provided.');
+    var saved = { id: INCIDENT_CONFIG.SPREADSHEET_ID, gid: INCIDENT_CONFIG.INCIDENTS_GID };
+    INCIDENT_CONFIG.SPREADSHEET_ID = sheetId;
+    INCIDENT_CONFIG.INCIDENTS_GID  = String(gid || '');
+    var result;
+    try { result = SheetFetchService.fetchAll(); }
+    finally {
+      INCIDENT_CONFIG.SPREADSHEET_ID = saved.id;
+      INCIDENT_CONFIG.INCIDENTS_GID  = saved.gid;
+    }
+    return { ok: true, rows: result.rows, _meta: result._meta || {} };
+  } catch (e) {
+    return { ok: false, rows: [], error: e.message || String(e) };
+  }
+}
+
 function getIncidentProvider_(source) {
   switch (source) {
     case 'sheets':     return SheetDataProvider;
