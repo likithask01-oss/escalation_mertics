@@ -263,6 +263,7 @@ var _FETCH_ALIASES_ = {
   customer_name:             ['customer_name','customer name','customer','account','company'],
   subject:                   ['subject','title','issue','summary','description'],
   last_update:               ['last_update','last update','update','latest update','notes'],
+  p0_time_to_first_update_mins: ['p0_time_to_first_update_mins','p0 time to first update (mins)','p0 fmr (mins)','p0 fmr'],
   time_to_first_update_mins: ['time_to_first_update_mins','time to first update (mins)','fmr (mins)','fmr','first response mins','tfu'],
   resolution_hours:          ['resolution_hours','resolution hours','age (hours)','resolution time','hours to close'],
   created_timestamp:         ['created_timestamp','created at','created','opened at','date opened','date created'],

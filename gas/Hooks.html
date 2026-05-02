@@ -19,23 +19,26 @@ var DATA_ENDPOINT = {
 /* ── Tab filter functions (presentation calls these) ─────────────── */
 var TAB_FILTERS = {
   EXEC_ESCALATIONS: function (r) {
-    var type = (r.iem_escalation_type || '').toLowerCase();
     var subj = (r.subject || '').toLowerCase();
-    return type.indexOf('exec escalation') !== -1 &&
-           (subj.indexOf('email - fwd') !== -1 || subj.indexOf('email - re') !== -1);
+    var type = (r.iem_escalation_type || '').toLowerCase();
+    return subj.indexOf('email - fwd') !== -1 ||
+           subj.indexOf('email - re')  !== -1 ||
+           type.indexOf('exec escalation') !== -1;
   },
   MCS: function (r) {
-    return (r.subject || '').toLowerCase().indexOf('mcs sf prod') !== -1;
+    return (r.subject || '').toLowerCase().indexOf('[mcs sf prod') !== -1;
   },
   CUF_P0_P1: function (r) {
     var s = (r.subject || '').toLowerCase();
-    return s.indexOf('cuf - account team') !== -1 || s.indexOf('cuf - other') !== -1;
+    return s.indexOf('cuf - account team') !== -1 ||
+           s.indexOf('cuf - other')        !== -1 ||
+           s.indexOf('cuf - tsgm')         !== -1;
   },
   CUF_GUP: function (r) {
     return (r.subject || '').toLowerCase().indexOf('cuf - gup') !== -1;
   },
   CUF_BILLING: function (r) {
-    return (r.iem_escalation_type || '').toLowerCase() === 'billing related';
+    return (r.iem_escalation_type || '').toLowerCase().indexOf('billing related') !== -1;
   },
   SOCIAL_CARE: function (r) {
     return (r.iem_escalation_type || '').toLowerCase().indexOf('social care') !== -1;
@@ -44,17 +47,29 @@ var TAB_FILTERS = {
 
 /* ── Shared helpers (consumed by ClientScript) ───────────────────── */
 function deriveStatus(row) {
-  var derived;
-  if (row.created_timestamp && !row.closed_timestamp) {
-    derived = 'In Progress';
-  } else if (row.created_timestamp && row.closed_timestamp) {
-    derived = 'Closed';
-  } else {
-    derived = 'Unknown';
-  }
-  // Conflict: raw status wins if it differs from derived
-  if (row.status && row.status !== derived) return row.status;
-  return derived;
+  var hasClosed  = row.closed_timestamp  && String(row.closed_timestamp).trim()  !== '';
+  var hasCreated = row.created_timestamp && String(row.created_timestamp).trim() !== '';
+  var derived = !hasCreated ? 'Unknown'
+              : hasClosed   ? 'Closed'
+              :               'In Progress';
+  // Raw status wins on conflict
+  var raw = (row.status || '').trim();
+  return (raw && raw !== derived) ? raw : derived;
+}
+
+/**
+ * Computes escalation age in hours from created_timestamp to
+ * closed_timestamp (or now if still open).
+ */
+function computeEscalationAge(row) {
+  var start = row.created_timestamp ? new Date(row.created_timestamp).getTime() : NaN;
+  if (isNaN(start)) return null;
+  var end = (row.closed_timestamp && String(row.closed_timestamp).trim() !== '')
+    ? new Date(row.closed_timestamp).getTime()
+    : Date.now();
+  var ms = end - start;
+  if (isNaN(ms) || ms < 0) return null;
+  return ms / 3600000;   // convert ms → hours
 }
 
 function formatResolutionAge(hours) {
