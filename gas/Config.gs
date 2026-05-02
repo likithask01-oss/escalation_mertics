@@ -1,25 +1,35 @@
 var INCIDENT_CONFIG = {
-  // Switch data source here: 'mock' | 'sheets' | 'csv' | 'driveExcel' | 'api'
+  // ── Active data source ──────────────────────────────────────────────────
+  // 'mock'        — in-memory mock data (local dev / default)
+  // 'publicSheet' — live Google Sheet via SheetFetchService (SpreadsheetApp → CSV fallback)
+  // 'sheets'      — legacy SheetDataProvider (named-sheet access)
+  // 'csv'         — Drive CSV file
+  // 'driveExcel'  — Drive Excel file
+  // 'api'         — external REST API
+  //
+  // NOTE: At runtime, getDashboardData() ALWAYS checks Script Properties first
+  //       (set via the dashboard's ⚙ Settings panel).  This value is only the
+  //       compile-time fallback when no Script Property has been saved yet.
   DATA_SOURCE: 'mock',
 
-  // Google Sheets settings (used when DATA_SOURCE = 'sheets')
-  SPREADSHEET_ID: '',
+  // ── Google Sheet settings ───────────────────────────────────────────────
+  // Used by SheetFetchService (DATA_SOURCE = 'publicSheet') and SheetDataProvider.
+  // These are fallback values; the Settings panel overwrites them via
+  // PropertiesService at runtime — no redeploy needed.
+  SPREADSHEET_ID:       '',   // e.g. '1SKir-kwioaUyPGkLh9y7HnYkKvwkFar8aWcU0vj8T1Q'
+  INCIDENTS_GID:        '',   // numeric GID of the incidents tab (blank = first sheet)
   INCIDENTS_SHEET_NAME: 'Incidents',
-  ONCALL_SHEET_NAME: 'OnCall',
+  ONCALL_SHEET_NAME:    'OnCall',
   COMMS_LOG_SHEET_NAME: 'CommsLog',
 
-  // Google Drive CSV file ID (used when DATA_SOURCE = 'csv')
-  CSV_FILE_ID: '',
+  // ── Legacy providers ────────────────────────────────────────────────────
+  CSV_FILE_ID:             '',
+  EXCEL_FILE_ID:           '',
+  API_BASE_URL:            '',
+  API_KEY_PROPERTY_NAME:   'INCIDENT_API_KEY',
 
-  // Google Drive Excel file ID (used when DATA_SOURCE = 'driveExcel')
-  EXCEL_FILE_ID: '',
-
-  // External API (used when DATA_SOURCE = 'api')
-  API_BASE_URL: '',
-  // Store the actual key in Script Properties under this name
-  API_KEY_PROPERTY_NAME: 'INCIDENT_API_KEY',
-
-  // Google Drive file ID for the IEM Team logo image (PNG/JPG)
-  // Leave empty to show the text fallback "IEM"
+  // ── Logo ────────────────────────────────────────────────────────────────
+  // Google Drive file ID for the IEM Team logo (PNG/JPG).
+  // Leave empty to show the text fallback "IEM".
   LOGO_FILE_ID: ''
 };

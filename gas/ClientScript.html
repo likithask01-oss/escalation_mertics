@@ -919,6 +919,356 @@
     if (right && h.apiLatency)      right.textContent = 'API: ' + h.apiLatency + ' | UPTIME: ' + h.uptime + ' | LOG: ' + h.logRate;
   }
 
+  /* ══════════════════════════════════════════════════════════════════
+     SETTINGS PANEL
+  ══════════════════════════════════════════════════════════════════ */
+
+  var _settingsState = {
+    dataSource: 'publicSheet',
+    sheetUrl:   '',
+    sheetId:    '',
+    sheetGid:   ''
+  };
+
+  function initSettings() {
+    var settingsBtn  = $('settingsBtn');
+    var backdrop     = $('settingsBackdrop');
+    var closeBtn     = $('settingsCloseBtn');
+    var cancelBtn    = $('settingsCancelBtn');
+    var saveBtn      = $('settingsSaveBtn');
+    var discoverBtn  = $('discoverTabsBtn');
+    var testBtn      = $('testConnBtn');
+    var urlInput     = $('settingsSheetUrl');
+    var idInput      = $('settingsSheetId');
+    var gidManual    = $('settingsGidManual');
+    var sourceBtns   = document.querySelectorAll('.source-btn');
+
+    if (!settingsBtn || !backdrop) return;
+
+    // Open
+    settingsBtn.addEventListener('click', openSettings);
+
+    // Close / cancel
+    function closeSettings() {
+      backdrop.style.display = 'none';
+      backdrop.setAttribute('aria-hidden', 'true');
+    }
+    closeBtn.addEventListener('click', closeSettings);
+    cancelBtn.addEventListener('click', closeSettings);
+    backdrop.addEventListener('click', function (e) {
+      if (e.target === backdrop) closeSettings();
+    });
+
+    // Source toggle
+    sourceBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        sourceBtns.forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        _settingsState.dataSource = btn.dataset.source;
+        _updateSourceSections();
+      });
+    });
+
+    // Auto-extract sheet ID from pasted URL
+    urlInput.addEventListener('input', function () {
+      var extracted = _parseSheetUrl(urlInput.value.trim());
+      if (extracted) {
+        idInput.value = extracted;
+        _settingsState.sheetId = extracted;
+      }
+      _settingsState.sheetUrl = urlInput.value.trim();
+    });
+    idInput.addEventListener('input', function () {
+      _settingsState.sheetId = idInput.value.trim();
+    });
+    gidManual.addEventListener('input', function () {
+      _settingsState.sheetGid = gidManual.value.trim();
+    });
+
+    // Discover tabs
+    discoverBtn.addEventListener('click', handleDiscoverTabs);
+
+    // Test connection
+    testBtn.addEventListener('click', handleTestConnection);
+
+    // Save
+    saveBtn.addEventListener('click', handleSaveConfig);
+
+    _updateSourceSections();
+  }
+
+  function openSettings() {
+    var backdrop = $('settingsBackdrop');
+    if (!backdrop) return;
+    backdrop.style.display = '';
+    backdrop.setAttribute('aria-hidden', 'false');
+    _settingsStatusHide();
+
+    // Load current config from GAS
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (cfg) { _applyConfig(cfg); })
+        .withFailureHandler(function ()    { /* use defaults */ })
+        .getSheetConfig();
+    }
+  }
+
+  function _applyConfig(cfg) {
+    if (!cfg) return;
+    _settingsState.dataSource = cfg.dataSource || 'publicSheet';
+    _settingsState.sheetUrl   = cfg.sheetUrl   || '';
+    _settingsState.sheetId    = cfg.sheetId    || '';
+    _settingsState.sheetGid   = cfg.sheetGid   || '';
+
+    var urlInput  = $('settingsSheetUrl');
+    var idInput   = $('settingsSheetId');
+    var gidManual = $('settingsGidManual');
+    var apiUrl    = $('settingsApiUrl');
+    if (urlInput)  urlInput.value  = _settingsState.sheetUrl;
+    if (idInput)   idInput.value   = _settingsState.sheetId;
+    if (gidManual) gidManual.value = _settingsState.sheetGid;
+    if (apiUrl && cfg.apiUrl) apiUrl.value = cfg.apiUrl;
+
+    // Update source toggle
+    var sourceBtns = document.querySelectorAll('.source-btn');
+    sourceBtns.forEach(function (btn) {
+      btn.classList.toggle('active', btn.dataset.source === _settingsState.dataSource);
+    });
+    _updateSourceSections();
+  }
+
+  function _updateSourceSections() {
+    var sheetSection  = $('sheetSection');
+    var apiSection    = $('apiSection');
+    var hintEl        = $('sourceHint');
+    var src           = _settingsState.dataSource;
+
+    if (sheetSection)  sheetSection.style.display  = (src === 'publicSheet') ? '' : 'none';
+    if (apiSection)    apiSection.style.display     = (src === 'api')         ? '' : 'none';
+
+    var hints = {
+      mock:        'Dashboard will use built-in mock data. No external source needed.',
+      publicSheet: 'Pull live data from a Google Sheet using the sheet ID or URL below.',
+      api:         'Pull live data from a REST API endpoint.'
+    };
+    if (hintEl) hintEl.textContent = hints[src] || '';
+  }
+
+  /**
+   * Extracts the spreadsheet ID from a Google Sheets URL, or returns the
+   * raw string if it already looks like a bare ID.
+   */
+  function _parseSheetUrl(urlOrId) {
+    if (!urlOrId) return '';
+    var m = urlOrId.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]{20,})/);
+    if (m) return m[1];
+    if (/^[A-Za-z0-9_-]{20,}$/.test(urlOrId)) return urlOrId;
+    return '';
+  }
+
+  /* ── Discover tabs ─────────────────────────────────────────────── */
+  function handleDiscoverTabs() {
+    var idInput   = $('settingsSheetId');
+    var urlInput  = $('settingsSheetUrl');
+    var discoverBtn = $('discoverTabsBtn');
+    var id = (idInput && idInput.value.trim()) || _parseSheetUrl(urlInput && urlInput.value.trim());
+    if (!id) {
+      _settingsStatusShow(false, 'Enter a Sheet URL or Sheet ID first.');
+      return;
+    }
+
+    discoverBtn.disabled    = true;
+    discoverBtn.textContent = 'Discovering…';
+
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (res) {
+          discoverBtn.disabled    = false;
+          discoverBtn.innerHTML   = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Discover Tabs';
+          if (!res.ok) { _settingsStatusShow(false, res.error || 'Failed to list tabs.'); return; }
+          _renderTabList(res.tabs || []);
+        })
+        .withFailureHandler(function (e) {
+          discoverBtn.disabled    = false;
+          discoverBtn.innerHTML   = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Discover Tabs';
+          _settingsStatusShow(false, (e && e.message) ? e.message : 'Could not reach sheet.');
+        })
+        .listSheetTabs(id);
+    } else {
+      // Local dev: simulate
+      discoverBtn.disabled    = false;
+      discoverBtn.innerHTML   = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Discover Tabs';
+      _renderTabList([
+        { name:'Escalations', gid:'0',          rowCount:42 },
+        { name:'OnCall',      gid:'1234567890', rowCount:6  },
+        { name:'CommsLog',    gid:'9876543210', rowCount:88 }
+      ]);
+    }
+  }
+
+  function _renderTabList(tabs) {
+    var section  = $('tabListSection');
+    var listEl   = $('tabList');
+    var hintEl   = $('tabListHint');
+    var manualEl = $('manualGidSection');
+    if (!section || !listEl) return;
+
+    listEl.innerHTML = '';
+    if (!tabs || tabs.length === 0) {
+      hintEl.textContent = 'No tabs found in this spreadsheet.';
+      section.style.display  = '';
+      if (manualEl) manualEl.style.display = '';
+      return;
+    }
+
+    tabs.forEach(function (tab) {
+      var item = document.createElement('div');
+      item.className = 'tab-list-item';
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', 'false');
+      item.dataset.gid  = tab.gid;
+      item.dataset.name = tab.name;
+      item.innerHTML =
+        '<span class="tli-name">' + _esc(tab.name) + '</span>' +
+        '<span class="tli-meta">GID: ' + _esc(tab.gid) + ' &nbsp;·&nbsp; ' + tab.rowCount + ' rows</span>';
+      item.addEventListener('click', function () {
+        listEl.querySelectorAll('.tab-list-item').forEach(function (el) {
+          el.classList.remove('selected');
+          el.setAttribute('aria-selected', 'false');
+        });
+        item.classList.add('selected');
+        item.setAttribute('aria-selected', 'true');
+        var gidInput = $('settingsGid');
+        if (gidInput) gidInput.value = tab.gid;
+        _settingsState.sheetGid = tab.gid;
+        if (hintEl) hintEl.textContent = 'Selected: "' + tab.name + '" (GID ' + tab.gid + ')';
+      });
+      listEl.appendChild(item);
+    });
+
+    if (hintEl) hintEl.textContent = 'Click the tab that contains your escalation data.';
+    section.style.display  = '';
+    if (manualEl) manualEl.style.display = '';
+  }
+
+  /* ── Test connection ──────────────────────────────────────────── */
+  function handleTestConnection() {
+    var testBtn = $('testConnBtn');
+    var id      = _settingsState.sheetId || _parseSheetUrl(_settingsState.sheetUrl);
+    if (_settingsState.dataSource === 'mock') {
+      _settingsStatusShow(true, 'Mock mode — no external connection needed.');
+      return;
+    }
+    if (!id && _settingsState.dataSource === 'publicSheet') {
+      _settingsStatusShow(false, 'Enter a Sheet URL or Sheet ID first.');
+      return;
+    }
+
+    testBtn.disabled    = true;
+    testBtn.textContent = 'Testing…';
+
+    var cfg = {
+      sheetUrl: _settingsState.sheetUrl,
+      sheetId:  id,
+      sheetGid: _settingsState.sheetGid
+    };
+
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (res) {
+          testBtn.disabled = false;
+          testBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Test Connection';
+          if (res.success) {
+            _settingsStatusShow(true,
+              'Connected via ' + res.fetchMethod + ' — ' + res.rowCount + ' rows' +
+              (res.tabName ? ' on tab "' + res.tabName + '"' : '') + '.');
+          } else {
+            _settingsStatusShow(false, res.error || 'Connection failed.');
+          }
+        })
+        .withFailureHandler(function (e) {
+          testBtn.disabled = false;
+          testBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Test Connection';
+          _settingsStatusShow(false, (e && e.message) ? e.message : 'Test failed.');
+        })
+        .testSheetConnection(cfg);
+    } else {
+      testBtn.disabled = false;
+      testBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Test Connection';
+      _settingsStatusShow(true, 'Local dev — mock connection OK. 24 rows.');
+    }
+  }
+
+  /* ── Save & reload ────────────────────────────────────────────── */
+  function handleSaveConfig() {
+    var saveBtn = $('settingsSaveBtn');
+    var apiUrl  = $('settingsApiUrl');
+    var cfg = {
+      dataSource: _settingsState.dataSource,
+      sheetUrl:   _settingsState.sheetUrl,
+      sheetId:    _settingsState.sheetId || _parseSheetUrl(_settingsState.sheetUrl),
+      sheetGid:   _settingsState.sheetGid,
+      apiUrl:     apiUrl ? apiUrl.value.trim() : ''
+    };
+
+    saveBtn.disabled    = true;
+    saveBtn.textContent = 'Saving…';
+
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (res) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Save &amp; Reload';
+          if (res && res.ok) {
+            // Also flip the frontend endpoint type so the running hook picks up the new source
+            DATA_ENDPOINT.type = cfg.dataSource === 'publicSheet' ? 'gas'
+                               : cfg.dataSource === 'mock'        ? 'mock'
+                               : cfg.dataSource === 'api'         ? 'rest'
+                               : 'gas';
+            $('settingsBackdrop').style.display = 'none';
+            showToast('Settings saved. Reloading data…', 2000);
+            setTimeout(loadDashboard, 2200);
+          } else {
+            _settingsStatusShow(false, (res && res.error) ? res.error : 'Save failed.');
+          }
+        })
+        .withFailureHandler(function (e) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Save &amp; Reload';
+          _settingsStatusShow(false, (e && e.message) ? e.message : 'Save failed.');
+        })
+        .saveSheetConfig(cfg);
+    } else {
+      // Local dev: just reload with mock
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Save &amp; Reload';
+      $('settingsBackdrop').style.display = 'none';
+      showToast('Settings saved (local dev — using mock data).', 2000);
+      setTimeout(loadDashboard, 2200);
+    }
+  }
+
+  /* ── Settings status helpers ──────────────────────────────────── */
+  function _settingsStatusShow(ok, msg) {
+    var el   = $('settingsStatus');
+    var icon = $('settingsStatusIcon');
+    var msgEl= $('settingsStatusMsg');
+    if (!el) return;
+    el.style.display = '';
+    el.className = 'settings-status ' + (ok ? 'settings-status-ok' : 'settings-status-err');
+    if (icon) icon.textContent = ok ? '✓' : '✗';
+    if (msgEl) msgEl.textContent = msg || '';
+  }
+  function _settingsStatusHide() {
+    var el = $('settingsStatus');
+    if (el) el.style.display = 'none';
+  }
+
+  /* HTML-escape helper (already used by other parts, safe to redefine locally) */
+  function _esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
   /* ── Toast ───────────────────────────────────────────────────── */
   function showToast(msg, ms) {
     var el = $('toast');
@@ -947,6 +1297,7 @@
     initModal();
     initLogo();
     initNotifications();
+    initSettings();
 
     // Subscribe to dashboard data
     useDashboardData.subscribe('change', function (data) {

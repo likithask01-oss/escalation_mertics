@@ -8,7 +8,9 @@
 
 /* ── Backend config (single change-point) ────────────────────────── */
 var DATA_ENDPOINT = {
-  type:       'mock',   // 'mock' | 'gas' | 'rest' | 'graphql'
+  // Auto-detect: 'gas' when running inside Google Apps Script,
+  //              'mock' when opened as a plain HTML file locally.
+  type:       (typeof google !== 'undefined' && google.script) ? 'gas' : 'mock',
   baseUrl:    '',       // REST: 'https://api.example.com/v1'
   graphqlUrl: '',       // GraphQL endpoint URL
   headers:    {}        // e.g. { 'Authorization': 'Bearer TOKEN' }
@@ -496,6 +498,22 @@ var useDashboardData = (function () {
 
   /* ── Normalisers ──────────────────────────────────────────────── */
   function _normaliseGas(d) {
+    // Surface any fetch error so the UI can display it.
+    if (d._error) {
+      console.error('[useDashboardData] GAS error:', d._error);
+    }
+
+    // ── New shape: { rows, monthly, raw, systemHealth } from SheetFetchService ──
+    if (d.rows && Array.isArray(d.rows)) {
+      return {
+        rows:         d.rows,
+        monthly:      d.monthly      || _MOCK_MONTHLY,
+        raw:          d.raw          || _MOCK_RAW,
+        systemHealth: d.systemHealth || {}
+      };
+    }
+
+    // ── Legacy shape: { incidents: [...] } from old providers ──────────────
     var rows = (d.incidents || []).map(function (inc) {
       return {
         bug_id:                    inc.bug_id                    || inc.id          || '',
@@ -514,7 +532,12 @@ var useDashboardData = (function () {
         iem_escalation_type:       inc.iem_escalation_type       || ''
       };
     });
-    return { rows: rows, monthly: _MOCK_MONTHLY, raw: _MOCK_RAW };
+    return {
+      rows:         rows,
+      monthly:      d.monthly      || _MOCK_MONTHLY,
+      raw:          d.raw          || _MOCK_RAW,
+      systemHealth: d.systemHealth || {}
+    };
   }
 
   function _normaliseRest(d) {
