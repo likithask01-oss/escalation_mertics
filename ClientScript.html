@@ -1,0 +1,1482 @@
+<script>
+(function () {
+  'use strict';
+
+  /* ── DOM helper ──────────────────────────────────────────────────── */
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ── App state ───────────────────────────────────────────────────── */
+  var activeTabId       = 'EXEC_ESCALATIONS';  // main tab
+  var activeCufSub      = 'CUF_P0_P1';          // CUF sub-tab
+  var activePeriod      = '3M';
+  var chartInstance     = null;
+  var analyticsInited   = false;
+  var selectedRowId     = null;
+  var ageIntervalId     = null;
+  var commsPanelCleanup = null;
+  var filterPopupCleanup = null;
+  var currentPage       = 1;
+  var PAGE_SIZE         = 10;
+  var sortState         = { col: 'created_timestamp', dir: 'desc' };
+  var colFilters        = {};         // { [colKey]: filterString }
+  var filterPopupCol    = null;       // which col the popup is open for
+  var _allRows          = [];         // raw data from hook
+
+  /* ── Column definitions ─────────────────────────────────────────── */
+  var COL_DEFS = [
+    { key:'bug_id',                    label:'IEM Bug ID',               sortable:true  },
+    { key:'iem_escalation_number',     label:'Vector Case',              sortable:true  },
+    { key:'current_assignee_ldap',     label:'Current Owner',            sortable:true  },
+    { key:'product_name',              label:'Product / Name',           sortable:true  },
+    { key:'priority',                  label:'Priority',                 sortable:true  },
+    { key:'customer_name',             label:'Customer / Service Level', sortable:true  },
+    { key:'subject',                   label:'Subject',                  sortable:true  },
+    { key:'last_update',               label:'Latest Update',            sortable:false },
+    { key:'time_to_first_update_mins', label:'FMR',                      sortable:true  },
+    { key:'resolution_hours',          label:'Escalation Age',           sortable:true  },
+    { key:'_status',                   label:'Status',                   sortable:true  }
+  ];
+
+  /* ── Tab registry ────────────────────────────────────────────────── */
+  var TABS = [
+    { id:'EXEC_ESCALATIONS', label:'EXEC ESCALATIONS', kpi:'KR2', chartTitle:'IEM Escalations — Exec',        rawTitle:'Exec Escalations RawData' },
+    { id:'MCS',              label:'MCS',              kpi:'KR4', chartTitle:'IEM Escalations — MCS',         rawTitle:'MCS RawData' },
+    { id:'CUF_ESCALATIONS',  label:'CUF ESCALATIONS',  kpi:'KR3', chartTitle:'IEM Escalations — CUF',         rawTitle:'CUF Escalations RawData' },
+    { id:'SOCIAL_CARE',      label:'SOCIAL CARE',      kpi:'KR7', chartTitle:'IEM Escalations — Social Care', rawTitle:'Social Care RawData' }
+  ];
+
+  var CUF_SUBS = [
+    { id:'CUF_P0_P1',   kpi:'KR3', chartTitle:'IEM Escalations — CUF P0/P1',   rawTitle:'CUF P0/P1 RawData' },
+    { id:'CUF_GUP',     kpi:'KR5', chartTitle:'IEM Escalations — CUF gUP',     rawTitle:'CUF gUP RawData' },
+    { id:'CUF_BILLING', kpi:'KR6', chartTitle:'IEM Escalations — CUF Billing', rawTitle:'CUF Billing RawData' }
+  ];
+
+  /* ── Returns the filter key for the currently active view ─────── */
+  function getFilterKey() {
+    return activeTabId === 'CUF_ESCALATIONS' ? activeCufSub : activeTabId;
+  }
+
+  /* ── useClickOutside ─────────────────────────────────────────────
+     Calls `callback` when any click lands outside every el in `els`.
+     Returns a cleanup function.
+  ──────────────────────────────────────────────────────────────── */
+  function useClickOutside(els, callback) {
+    function handler(e) {
+      var outside = els.every(function (el) { return el && !el.contains(e.target); });
+      if (outside) { callback(); document.removeEventListener('click', handler, true); }
+    }
+    setTimeout(function () { document.addEventListener('click', handler, true); }, 0);
+    return function cleanup() { document.removeEventListener('click', handler, true); };
+  }
+
+  /* ── Utility: escape HTML ────────────────────────────────────── */
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  }
+
+  /* ── Utility: timeAgo ────────────────────────────────────────── */
+  function timeAgo(iso) {
+    if (!iso) return '—';
+    var diff = Math.max(0, Date.now() - new Date(iso).getTime());
+    var m = Math.floor(diff / 60000);
+    if (m < 1)  return 'just now';
+    if (m < 60) return m + 'm ago';
+    var h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+  }
+
+  /* ── Utility: formatTs ───────────────────────────────────────── */
+  function formatTs(iso) {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleString('en-US', {
+        month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false
+      });
+    } catch (e) { return iso; }
+  }
+
+  /* ── FMR colour class ────────────────────────────────────────── */
+  function fmrClass(mins) {
+    var m = Number(mins);
+    if (isNaN(m)) return '';
+    if (m <=  5) return 'fmr-good';
+    if (m <= 15) return 'fmr-warn';
+    return 'fmr-bad';
+  }
+
+  /* ── Priority badge ──────────────────────────────────────────── */
+  function priorityBadge(p) {
+    var cls = p === 'P0' ? 'badge-sev-p0'
+            : p === 'P1' ? 'badge-sev-p1'
+            : 'badge-sev-other';
+    return '<span class="badge ' + cls + '">' + esc(p) + '</span>';
+  }
+
+  /* ── Status cell ─────────────────────────────────────────────── */
+  function statusCell(status) {
+    var isActive = (status === 'In Progress' || status === 'Investigating' || status === 'Monitoring' || status === 'Customer Update Pending');
+    var dotCls   = isActive ? '' : 'static';
+    return '<div class="status-cell"><span class="pulse-dot ' + dotCls + '"></span>' + esc(status) + '</div>';
+  }
+
+  /* ── Sort value extractor ────────────────────────────────────── */
+  function sortVal(row, col) {
+    if (col === '_status')              return deriveStatus(row);
+    if (col === 'resolution_hours')     return Number(row.resolution_hours) || 0;
+    if (col === 'time_to_first_update_mins') return Number(row.time_to_first_update_mins) || 0;
+    if (col === 'created_timestamp')    return new Date(row.created_timestamp).getTime() || 0;
+    return String(row[col] || '').toLowerCase();
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     COLUMN HEADER INIT
+     Generates <th> elements with sort (3-state) and filter (funnel)
+     icon buttons for every column defined in COL_DEFS.
+  ══════════════════════════════════════════════════════════════════ */
+  function initColumnHeaders() {
+    var tr = $('tableHeaderRow');
+    if (!tr) return;
+    tr.innerHTML = COL_DEFS.map(function (col) {
+      var sortBtns = col.sortable
+        ? '<button class="th-sort-btn s-unsorted" data-sort-col="' + col.key + '" aria-label="Sort by ' + col.label + '" title="Sort">' +
+            /* unsorted icon */ '<svg class="ic-sort-un" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 9l4-4 4 4"/><path d="M16 15l-4 4-4-4"/></svg>' +
+            /* asc icon */      '<svg class="ic-sort-asc" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5l-7 7h14z"/></svg>' +
+            /* desc icon */     '<svg class="ic-sort-desc" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19l7-7H5z"/></svg>' +
+          '</button>'
+        : '';
+      var filterBtn = '<button class="th-filter-btn" data-filter-col="' + col.key + '" aria-label="Filter ' + col.label + '" title="Filter">' +
+          '<svg class="ic-filter" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>' +
+        '</button>';
+      return '<th class="th-col"><div class="th-inner"><span class="th-label">' + esc(col.label) + '</span><div class="th-btns">' + sortBtns + filterBtn + '</div></div></th>';
+    }).join('');
+
+    // Wire sort buttons
+    tr.querySelectorAll('.th-sort-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        handleSortClick(btn.dataset.sortCol);
+      });
+    });
+
+    // Wire filter buttons
+    tr.querySelectorAll('.th-filter-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openFilterPopup(btn.dataset.filterCol, btn);
+      });
+    });
+
+    updateSortIcons();
+  }
+
+  /* ── Sort ─────────────────────────────────────────────────────── */
+  function handleSortClick(col) {
+    if (sortState.col === col) {
+      // cycle: asc → desc → null (default created_timestamp desc)
+      if (sortState.dir === 'asc')  { sortState.dir = 'desc'; }
+      else if (sortState.dir === 'desc') { sortState = { col: 'created_timestamp', dir: 'desc' }; }
+    } else {
+      sortState = { col: col, dir: 'asc' };
+    }
+    updateSortIcons();
+    currentPage = 1;
+    renderIncidentTable();
+  }
+
+  function updateSortIcons() {
+    var tr = $('tableHeaderRow');
+    if (!tr) return;
+    tr.querySelectorAll('.th-sort-btn').forEach(function (btn) {
+      var col = btn.dataset.sortCol;
+      btn.classList.remove('s-unsorted', 's-asc', 's-desc');
+      if (sortState.col === col) {
+        btn.classList.add(sortState.dir === 'asc' ? 's-asc' : 's-desc');
+      } else {
+        btn.classList.add('s-unsorted');
+      }
+    });
+  }
+
+  /* ── Column filter popup ─────────────────────────────────────── */
+  function openFilterPopup(colKey, triggerBtn) {
+    // If same column popup already open → close it
+    if (filterPopupCol === colKey && $('colFilterPopup').style.display !== 'none') {
+      closeFilterPopup();
+      return;
+    }
+    filterPopupCol = colKey;
+
+    var popup = $('colFilterPopup');
+    var input = $('colFilterInput');
+    if (!popup || !input) return;
+
+    // Position fixed relative to trigger button
+    var rect = triggerBtn.getBoundingClientRect();
+    popup.style.top  = (rect.bottom + 4) + 'px';
+    popup.style.left = Math.min(rect.left, window.innerWidth - 220) + 'px';
+    popup.style.display = '';
+
+    input.value = colFilters[colKey] || '';
+    input.focus();
+
+    // Highlight the active filter button
+    updateFilterIcons();
+
+    if (filterPopupCleanup) filterPopupCleanup();
+    filterPopupCleanup = useClickOutside([popup, triggerBtn], closeFilterPopup);
+  }
+
+  function closeFilterPopup() {
+    var popup = $('colFilterPopup');
+    if (popup) popup.style.display = 'none';
+    filterPopupCol = null;
+    if (filterPopupCleanup) { filterPopupCleanup(); filterPopupCleanup = null; }
+  }
+
+  function initFilterPopup() {
+    var input   = $('colFilterInput');
+    var clearBtn = $('colFilterClearBtn');
+    if (!input || !clearBtn) return;
+
+    input.addEventListener('input', function () {
+      if (filterPopupCol) {
+        colFilters[filterPopupCol] = input.value;
+        updateFilterIcons();
+        currentPage = 1;
+        renderIncidentTable();
+      }
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { closeFilterPopup(); }
+      e.stopPropagation();
+    });
+    clearBtn.addEventListener('click', function () {
+      if (filterPopupCol) {
+        colFilters[filterPopupCol] = '';
+        input.value = '';
+        updateFilterIcons();
+        currentPage = 1;
+        renderIncidentTable();
+      }
+    });
+  }
+
+  function updateFilterIcons() {
+    var tr = $('tableHeaderRow');
+    if (!tr) return;
+    tr.querySelectorAll('.th-filter-btn').forEach(function (btn) {
+      var col = btn.dataset.filterCol;
+      btn.classList.toggle('f-active', !!(colFilters[col] && colFilters[col].length > 0));
+    });
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     INCIDENT TABLE RENDER
+  ══════════════════════════════════════════════════════════════════ */
+  function getActiveRows() {
+    var filterKey = getFilterKey();
+    var filter    = TAB_FILTERS[filterKey];
+    return _allRows.filter(filter || function () { return true; });
+  }
+
+  function renderIncidentTable() {
+    var tbody = $('liveEscTbody');
+    if (!tbody) return;
+
+    var rows = getActiveRows();
+
+    // 1. Add derived _status field
+    rows = rows.map(function (r) {
+      return Object.assign({}, r, { _status: deriveStatus(r) });
+    });
+
+    // 2. Apply column filters
+    rows = rows.filter(function (r) {
+      return COL_DEFS.every(function (col) {
+        var f = (colFilters[col.key] || '').toLowerCase().trim();
+        if (!f) return true;
+        var val = col.key === 'resolution_hours'
+          ? formatResolutionAge(r.resolution_hours)
+          : col.key === 'time_to_first_update_mins'
+          ? formatFmr(r.time_to_first_update_mins)
+          : String(r[col.key] || '');
+        return val.toLowerCase().indexOf(f) !== -1;
+      });
+    });
+
+    // 3. Sort
+    rows = rows.slice().sort(function (a, b) {
+      var av = sortVal(a, sortState.col);
+      var bv = sortVal(b, sortState.col);
+      var cmp = (typeof av === 'number' && typeof bv === 'number')
+        ? av - bv
+        : String(av).localeCompare(String(bv));
+      return sortState.dir === 'asc' ? cmp : -cmp;
+    });
+
+    // 4. Paginate
+    var totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+    if (currentPage > totalPages) currentPage = totalPages;
+    var start     = (currentPage - 1) * PAGE_SIZE;
+    var pageItems = rows.slice(start, start + PAGE_SIZE);
+
+    updatePaginationBar(currentPage, totalPages, rows.length, start, pageItems.length);
+
+    // 5. Render rows
+    if (!pageItems.length) {
+      var hasFilter = Object.keys(colFilters).some(function (k) { return colFilters[k]; });
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="' + COL_DEFS.length + '">' +
+        (hasFilter ? 'No results match the current filters.' : 'No escalations for this category.') +
+        '</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = pageItems.map(function (r) {
+      var status = r._status;
+      return '<tr data-id="' + esc(r.bug_id) + '" data-created="' + esc(r.created_timestamp) + '"' +
+             ' tabindex="0"' + (selectedRowId === r.bug_id ? ' class="selected"' : '') + '>' +
+        /* IEM Bug ID */           '<td class="bold mono"><a class="rd-id" href="https://b/' + esc(r.bug_id.replace('b/','')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(r.bug_id) + '</a></td>' +
+        /* Vector Case */          '<td class="mono">' + esc(r.iem_escalation_number) + '</td>' +
+        /* Current Owner */        '<td class="bold">' + esc(r.current_assignee_ldap) + '</td>' +
+        /* Product / Name */       '<td>' + esc(r.product_name) + '</td>' +
+        /* Priority */             '<td>' + priorityBadge(r.priority) + '</td>' +
+        /* Customer / SvcLevel */  '<td>' + esc(r.customer_name) + '</td>' +
+        /* Subject */              '<td class="td-subject" title="' + esc(r.subject) + '">' + esc(r.subject) + '</td>' +
+        /* Latest Update */        '<td class="td-update muted" title="' + esc(r.last_update) + '">' + esc(r.last_update) + '</td>' +
+        /* FMR */                  '<td><span class="fmr-cell ' + fmrClass(r.time_to_first_update_mins) + '">' + esc(formatFmr(r.time_to_first_update_mins)) + '</span></td>' +
+        /* Escalation Age */       '<td><span class="age-cell">' + esc(formatResolutionAge(r.resolution_hours)) + '</span></td>' +
+        /* Status */               '<td>' + statusCell(status) + '</td>' +
+      '</tr>';
+    }).join('');
+
+    // Row click → open comms panel
+    tbody.querySelectorAll('tr[data-id]').forEach(function (row) {
+      row.addEventListener('click', function (e) {
+        if (e.target.closest('a')) return;
+        selectRow(row.dataset.id);
+      });
+      row.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.target.closest('a')) selectRow(row.dataset.id);
+      });
+    });
+  }
+
+  /* ── Row selection + inline comms ───────────────────────────── */
+  function selectRow(bugId) {
+    selectedRowId = bugId;
+    var tbody = $('liveEscTbody');
+    if (tbody) tbody.querySelectorAll('tr[data-id]').forEach(function (r) {
+      r.classList.toggle('selected', r.dataset.id === bugId);
+    });
+    renderInlineComms(bugId);
+
+    if (commsPanelCleanup) commsPanelCleanup();
+    commsPanelCleanup = useClickOutside(
+      [$('liveEscCard'), $('commsPanel')],
+      closeCommsPanel
+    );
+  }
+
+  function closeCommsPanel() {
+    var panel = $('commsPanel');
+    if (panel) panel.innerHTML = '';
+    selectedRowId = null;
+    var tbody = $('liveEscTbody');
+    if (tbody) tbody.querySelectorAll('tr[data-id]').forEach(function (r) { r.classList.remove('selected'); });
+    if (commsPanelCleanup) { commsPanelCleanup(); commsPanelCleanup = null; }
+  }
+
+  /* ── Deep-link from notification: navigate tab → select row ─── */
+  function navigateToIncident(bugId, tabKey) {
+    closeNotifDropdown();
+    var mainTab, cufSub;
+    if (tabKey === 'CUF_P0_P1' || tabKey === 'CUF_GUP' || tabKey === 'CUF_BILLING') {
+      mainTab = 'CUF_ESCALATIONS';
+      cufSub  = tabKey;
+    } else {
+      mainTab = tabKey;
+      cufSub  = null;
+    }
+    switchTab(mainTab);
+    if (cufSub) switchCufSub(cufSub);
+    // After render, find & select the row
+    setTimeout(function () {
+      // find the row on any page
+      var rows = getActiveRows();
+      var found = rows.filter(function (r) { return r.bug_id === bugId; })[0];
+      if (found) {
+        // bring to page 1, scroll to row
+        currentPage = 1;
+        renderIncidentTable();
+        setTimeout(function () {
+          var tbody = $('liveEscTbody');
+          if (!tbody) return;
+          var row = tbody.querySelector('tr[data-id="' + bugId + '"]');
+          if (row) { row.scrollIntoView({ behavior:'smooth', block:'center' }); selectRow(bugId); }
+          else { selectRow(bugId); }
+        }, 50);
+      }
+    }, 100);
+  }
+
+  /* ── Inline comms blast ──────────────────────────────────────── */
+  function renderInlineComms(bugId) {
+    var panel = $('commsPanel');
+    if (!panel) return;
+    var row = _allRows.filter(function (r) { return r.bug_id === bugId; })[0];
+    if (!row) return;
+
+    panel.innerHTML =
+      '<div class="comms-panel">' +
+        '<div class="comms-panel-header"><div class="comms-dot"></div>' +
+          '<span class="section-label">Latest Comms Blast — ' + esc(row.bug_id) + ' / ' + esc(row.iem_escalation_number) + '</span>' +
+        '</div>' +
+        '<div class="comms-panel-body"><div class="state-panel compact"><div class="spinner"></div><p>Loading…</p></div></div>' +
+      '</div>';
+
+    useDashboardData.fetchCommsLog(bugId, function (logs) {
+      renderInlineLog(panel, row, logs || []);
+    });
+  }
+
+  function renderInlineLog(panel, row, logs) {
+    var latest   = logs.length ? logs[logs.length - 1] : null;
+    var histRows = logs.slice().reverse().map(function (l, i) {
+      return '<tr>' +
+        '<td class="ts">' + esc(formatTs(l.timestamp)) + '</td>' +
+        '<td>' + (i === logs.length - 1 ? 'Initial Update' : 'Update #' + (logs.length - 1 - i)) + '</td>' +
+        '<td>' + esc(l.author) + '</td>' +
+      '</tr>';
+    }).join('');
+    var msgText = latest ? latest.message : 'No communications logged yet.';
+    var safeMsgAttr = msgText.replace(/"/g,'&quot;');
+
+    panel.innerHTML =
+      '<div class="comms-panel">' +
+        '<div class="comms-panel-header"><div class="comms-dot"></div>' +
+          '<span class="section-label">Latest Comms Blast — ' + esc(row.bug_id) + ' / ' + esc(row.iem_escalation_number) + '</span>' +
+        '</div>' +
+        '<div class="comms-panel-body">' +
+          '<div class="comms-message-box"><p class="comms-message-text">' + esc(msgText) + '</p></div>' +
+          '<div class="comms-meta">' +
+            '<span>' + (latest ? 'Sent ' + timeAgo(latest.timestamp) : '—') + '</span>' +
+            '<span>BY: ' + esc(latest ? latest.author : '—') + '</span>' +
+            '<button class="btn-log" onclick="copyCommsText(this)" data-text="' + safeMsgAttr + '">Copy Text</button>' +
+          '</div>' +
+          (histRows
+            ? '<div class="comms-history-title">History of Comms</div>' +
+              '<table class="comms-history-table"><thead><tr><th>Timestamp</th><th>Type</th><th>IEM POC</th></tr></thead>' +
+              '<tbody>' + histRows + '</tbody></table>'
+            : '') +
+        '</div>' +
+      '</div>';
+  }
+
+  window.copyCommsText = function (btn) {
+    var text = btn.dataset.text || '';
+    if (navigator.clipboard) navigator.clipboard.writeText(text);
+    showToast('Copied to clipboard.');
+  };
+
+  /* ── Pagination ──────────────────────────────────────────────── */
+  function initPagination() {
+    var prevBtn = $('prevPageBtn');
+    var nextBtn = $('nextPageBtn');
+    if (prevBtn) prevBtn.addEventListener('click', function () {
+      if (currentPage > 1) { currentPage--; renderIncidentTable(); }
+    });
+    if (nextBtn) nextBtn.addEventListener('click', function () {
+      currentPage++;
+      renderIncidentTable();
+    });
+  }
+
+  function updatePaginationBar(page, totalPages, total, start, pageCount) {
+    var bar     = $('paginationBar');
+    var info    = $('pageInfo');
+    var prevBtn = $('prevPageBtn');
+    var nextBtn = $('nextPageBtn');
+    if (!bar) return;
+    if (total === 0) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+    if (info) {
+      var end = start + pageCount;
+      info.textContent = 'Page ' + page + ' of ' + totalPages + ' — ' + (start + 1) + '–' + end + ' of ' + total;
+    }
+    if (prevBtn) prevBtn.disabled = (page <= 1);
+    if (nextBtn) nextBtn.disabled = (page >= totalPages);
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     TAB NAVIGATION
+  ══════════════════════════════════════════════════════════════════ */
+  function initTabs() {
+    document.querySelectorAll('.tab').forEach(function (btn) {
+      btn.addEventListener('click', function () { switchTab(btn.dataset.tab); });
+    });
+    document.querySelectorAll('.subtab').forEach(function (btn) {
+      btn.addEventListener('click', function () { switchCufSub(btn.dataset.cuf); });
+    });
+  }
+
+  function switchTab(tabId) {
+    activeTabId   = tabId;
+    selectedRowId = null;
+    currentPage   = 1;
+    colFilters    = {};
+    sortState     = { col:'created_timestamp', dir:'desc' };
+
+    document.querySelectorAll('.tab').forEach(function (b) {
+      var on = b.dataset.tab === tabId;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+
+    // Show/hide CUF sub-tab bar
+    var cufBar = $('cufSubTabBar');
+    if (cufBar) cufBar.style.display = (tabId === 'CUF_ESCALATIONS') ? '' : 'none';
+
+    closeCommsPanel();
+    closeFilterPopup();
+    renderActiveTab();
+  }
+
+  function switchCufSub(subId) {
+    activeCufSub  = subId;
+    selectedRowId = null;
+    currentPage   = 1;
+    colFilters    = {};
+    sortState     = { col:'created_timestamp', dir:'desc' };
+
+    document.querySelectorAll('.subtab').forEach(function (b) {
+      var on = b.dataset.cuf === subId;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+
+    closeCommsPanel();
+    closeFilterPopup();
+    renderActiveTab();
+  }
+
+  /* ── Render active tab view ──────────────────────────────────── */
+  function renderActiveTab() {
+    var filterKey = getFilterKey();
+    var tab = TABS.filter(function (t) { return t.id === activeTabId; })[0] || TABS[0];
+    var sub = CUF_SUBS.filter(function (s) { return s.id === filterKey; })[0];
+    var meta = sub || tab;
+
+    var labelEl = $('activeTabLabel');
+    if (labelEl) labelEl.textContent = tab.label;
+
+    var activeRows  = getActiveRows();
+    var activeCount = activeRows.filter(function (r) { return !r.closed_timestamp; }).length;
+
+    var countEl = $('activeTabCount');  if (countEl) countEl.textContent = activeCount + ' active';
+    var badgeEl = $('activeBadge');     if (badgeEl) badgeEl.textContent = activeCount + ' ACTIVE';
+
+    var kpiEl = $('kpiTag');       if (kpiEl) kpiEl.textContent = meta.kpi || tab.kpi;
+    var ctEl  = $('chartTitle');   if (ctEl)  ctEl.textContent  = meta.chartTitle;
+    var rdEl  = $('rawDataTitle'); if (rdEl)  rdEl.textContent  = meta.rawTitle;
+
+    initColumnHeaders();
+    updateSortIcons();
+    renderIncidentTable();
+
+    clearInterval(ageIntervalId);
+
+    if (analyticsInited) applyAnalyticsFilter(activePeriod);
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     ANALYTICS
+  ══════════════════════════════════════════════════════════════════ */
+  function initAnalytics() {
+    if (analyticsInited) return;
+    analyticsInited = true;
+    document.querySelectorAll('.timeline-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        activePeriod = btn.dataset.period;
+        document.querySelectorAll('.timeline-btn').forEach(function (b) {
+          b.classList.toggle('active', b.dataset.period === activePeriod);
+        });
+        applyAnalyticsFilter(activePeriod);
+      });
+    });
+    applyAnalyticsFilter(activePeriod);
+  }
+
+  function applyAnalyticsFilter(period) {
+    if (!_allRows.length) return;
+    var filterKey = getFilterKey();
+
+    // Fetch monthly and raw from data hook's last known data
+    var monthly = (window._dashData && window._dashData.monthly && window._dashData.monthly[filterKey]) || [];
+    var raw     = (window._dashData && window._dashData.raw     && window._dashData.raw[filterKey])     || [];
+
+    var fMonthly = getFilteredMonthly(monthly, period);
+    var fRaw     = getFilteredRaw(raw, period);
+
+    renderBarChart(fMonthly);
+    renderRawTable(fRaw);
+  }
+
+  var PERIOD_MONTHS = { '1W':0.25,'1M':1,'3M':3,'6M':6,'Q':3,'Y':12 };
+  var PERIOD_LABEL  = { '1W':'1 Week','1M':'1 Month','3M':'3 Months','6M':'6 Months','Q':'Quarterly','Y':'Yearly' };
+
+  function getFilteredMonthly(monthly, period) {
+    var n = PERIOD_MONTHS[period] || 3;
+    var cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - Math.ceil(n));
+    return monthly.filter(function (m) { return new Date(m.month + '-01') >= cutoff; });
+  }
+
+  function getFilteredRaw(raw, period) {
+    var n = PERIOD_MONTHS[period] || 3;
+    var cutoff = new Date();
+    cutoff.setMonth(cutoff.getMonth() - Math.ceil(n));
+    return raw.filter(function (r) { return new Date(r.month + '-01') >= cutoff; });
+  }
+
+  function monthLabel(ym) {
+    try {
+      return new Date(ym + '-01').toLocaleDateString('en-US', { month:'short', year:'2-digit' });
+    } catch (e) { return ym; }
+  }
+
+  /* ── Bar-only chart (SLO line removed) ──────────────────────── */
+  function renderBarChart(monthly) {
+    var isDark  = document.body.classList.contains('theme-dark');
+    var gridClr = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+    var textClr = isDark ? '#71717a' : '#64748b';
+    var barClr  = isDark ? 'rgba(59,130,246,0.75)' : 'rgba(37,99,235,0.65)';
+
+    var labels = monthly.map(function (m) { return monthLabel(m.month); });
+    var counts = monthly.map(function (m) { return m.count; });
+
+    if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+
+    var ctx = $('mainChart');
+    if (!ctx) return;
+    chartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Count',
+          data:  counts,
+          backgroundColor: barClr,
+          borderRadius: 4,
+          borderSkipped: 'bottom'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function (ctx) { return ' Count: ' + ctx.raw; }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: gridClr },
+            ticks: { color: textClr, font: { size: 10 } }
+          },
+          y: {
+            beginAtZero: true,
+            grid: { color: gridClr },
+            ticks: { color: textClr, font: { size: 10 }, precision: 0 }
+          }
+        }
+      }
+    });
+  }
+
+  /* ── Raw data table ──────────────────────────────────────────── */
+  function renderRawTable(raw) {
+    var tbody = $('rawDataTbody');
+    var count = $('rawDataCount');
+    if (!tbody) return;
+    if (count) count.textContent = raw.length + ' records';
+    if (!raw.length) {
+      tbody.innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-faint);font-style:italic;font-size:0.72rem">No records in selected period.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = raw.map(function (r) {
+      return '<tr>' +
+        '<td class="rd-month">' + esc(r.month)      + '</td>' +
+        '<td class="rd-id">'   + esc(r.bugId)       + '</td>' +
+        '<td class="rd-esc">'  + esc(r.escalation)  + '</td>' +
+        '<td class="rd-subject" title="' + esc(r.subject) + '">' + esc(r.subject) + '</td>' +
+        '<td class="rd-ts">'   + esc(r.created)     + '</td>' +
+        '<td class="rd-ts">'   + esc(r.firstAssign) + '</td>' +
+        '<td class="rd-ts">'   + esc(r.firstUpdate) + '</td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     LOGO + USER AVATAR
+  ══════════════════════════════════════════════════════════════════ */
+  function initLogo() {
+    var logoEl   = $('teamLogo');
+    var fallback = $('teamLogoFallback');
+    if (!logoEl) return;
+
+    function showLogo()     { logoEl.style.display = '';    if (fallback) fallback.style.display = 'none'; }
+    function showFallback() { logoEl.style.display = 'none'; if (fallback) fallback.style.display = ''; }
+
+    var gasUrl = (typeof GAS_LOGO_URL !== 'undefined') ? GAS_LOGO_URL : '';
+    if (gasUrl && gasUrl.indexOf('<?') === -1 && gasUrl.length > 4) {
+      logoEl.src = gasUrl;
+      logoEl.onload = showLogo;
+      logoEl.onerror = showFallback;
+    } else if (typeof google === 'undefined' || !google.script) {
+      logoEl.src = '../Screenshot 2026-02-03 at 4.13.25 AM.png';
+      logoEl.onload = showLogo;
+      logoEl.onerror = showFallback;
+    } else {
+      showFallback();
+    }
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     NOTIFICATIONS
+  ══════════════════════════════════════════════════════════════════ */
+  function initNotifications() {
+    var btn      = $('notifBtn');
+    var dropdown = $('notifDropdown');
+    var wrap     = $('notifWrap');
+    if (!btn || !dropdown) return;
+
+    // Subscribe to hook updates
+    useNotifications.subscribe(function (items) {
+      renderNotifBadge(items);
+      renderNotifList(items);
+    });
+
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var isOpen = dropdown.style.display !== 'none';
+      if (isOpen) {
+        closeNotifDropdown();
+      } else {
+        dropdown.style.display = '';
+        btn.setAttribute('aria-expanded', 'true');
+        useClickOutside([wrap], closeNotifDropdown);
+      }
+    });
+
+    var markAllBtn = $('markAllReadBtn');
+    if (markAllBtn) {
+      markAllBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        useNotifications.markAllRead();
+      });
+    }
+
+    useNotifications.init();
+  }
+
+  function closeNotifDropdown() {
+    var dropdown = $('notifDropdown');
+    var btn      = $('notifBtn');
+    if (dropdown) dropdown.style.display = 'none';
+    if (btn)      btn.setAttribute('aria-expanded', 'false');
+  }
+
+  function renderNotifBadge(items) {
+    var unread = items.filter(function (n) { return !n.read; }).length;
+    var badge  = $('notifBadge');
+    if (!badge) return;
+    badge.textContent   = unread;
+    badge.style.display = unread > 0 ? '' : 'none';
+    var btn = $('notifBtn');
+    if (btn) btn.setAttribute('aria-label', 'Notifications' + (unread > 0 ? ' — ' + unread + ' unread' : ''));
+  }
+
+  function renderNotifList(items) {
+    var list = $('notifList');
+    if (!list) return;
+    if (!items.length) {
+      list.innerHTML = '<div class="notif-empty">No notifications</div>';
+      return;
+    }
+    list.innerHTML = items.map(function (n) {
+      return '<div class="notif-item' + (n.read ? '' : ' notif-unread') + '" ' +
+        'data-notif-id="' + esc(n.id) + '" ' +
+        'data-incident-id="' + esc(n.incidentId) + '" ' +
+        'data-tab-key="' + esc(n.tabKey) + '" ' +
+        'tabindex="0" role="menuitem">' +
+          '<div class="notif-item-meta">' +
+            '<span class="notif-bug-id">' + esc(n.bugId) + '</span>' +
+            '<span class="notif-ts">' + timeAgo(n.ts) + '</span>' +
+          '</div>' +
+          '<div class="notif-item-title">' + esc(n.title) + '</div>' +
+          '<div class="notif-item-body">' + esc(n.body) + '</div>' +
+        '</div>';
+    }).join('');
+
+    list.querySelectorAll('.notif-item').forEach(function (item) {
+      function openItem() {
+        var id        = item.dataset.notifId;
+        var bugId     = item.dataset.incidentId;
+        var tabKey    = item.dataset.tabKey;
+        useNotifications.markRead(id);
+        closeNotifDropdown();
+        navigateToIncident(bugId, tabKey);
+      }
+      item.addEventListener('click', openItem);
+      item.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openItem(); } });
+    });
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     MODAL
+  ══════════════════════════════════════════════════════════════════ */
+  function initModal() {
+    var closeBtn = $('modalCloseBtn');
+    var backdrop = $('logModalBackdrop');
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (backdrop) backdrop.addEventListener('click', function (e) { if (e.target === this) closeModal(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
+  }
+
+  function closeModal() {
+    var bd = $('logModalBackdrop');
+    if (!bd) return;
+    bd.style.display = 'none';
+    bd.setAttribute('aria-hidden', 'true');
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     THEME + CLOCK
+  ══════════════════════════════════════════════════════════════════ */
+  function initTheme() {
+    var saved = localStorage.getItem('iem-theme');
+    var theme = saved || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    applyTheme(theme);
+    var btn = $('themeToggleBtn');
+    if (btn) btn.addEventListener('click', function () {
+      applyTheme(document.body.classList.contains('theme-light') ? 'dark' : 'light');
+    });
+  }
+
+  function applyTheme(theme) {
+    document.body.classList.remove('theme-dark', 'theme-light');
+    document.body.classList.add('theme-' + theme);
+    document.body.setAttribute('data-theme', theme);
+    var iconDark  = $('themeIconDark');
+    var iconLight = $('themeIconLight');
+    if (iconDark)  iconDark.style.display  = theme === 'dark'  ? '' : 'none';
+    if (iconLight) iconLight.style.display = theme === 'light' ? '' : 'none';
+    localStorage.setItem('iem-theme', theme);
+    if (analyticsInited) applyAnalyticsFilter(activePeriod);
+  }
+
+  function initClock() {
+    function tick() {
+      var el = $('clock');
+      if (el) el.textContent = new Date().toLocaleTimeString('en-US', { hour12:false, timeZone:'America/Los_Angeles' });
+    }
+    tick();
+    setInterval(tick, 1000);
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     STATE PANELS + FOOTER
+  ══════════════════════════════════════════════════════════════════ */
+  function showLoading() {
+    if ($('loadingState'))    $('loadingState').style.display    = '';
+    if ($('errorState'))      $('errorState').style.display      = 'none';
+    if ($('dashboardContent'))$('dashboardContent').style.display = 'none';
+  }
+
+  function showDashboard() {
+    if ($('loadingState'))    $('loadingState').style.display    = 'none';
+    if ($('errorState'))      $('errorState').style.display      = 'none';
+    if ($('dashboardContent'))$('dashboardContent').style.display = '';
+  }
+
+  function showError(msg) {
+    if ($('loadingState'))    $('loadingState').style.display    = 'none';
+    if ($('dashboardContent'))$('dashboardContent').style.display = 'none';
+    if ($('errorState'))      $('errorState').style.display      = '';
+    if ($('errorMsg'))        $('errorMsg').textContent           = msg || 'Failed to load data.';
+  }
+
+  function updateFooter(h) {
+    var left  = $('footer-left');
+    var right = $('footer-right');
+    if (left  && h.version)         left.textContent  = (h.version || 'v4.2.1-RELEASE') + ' | AUTHENTICATED: ' + (h.authenticatedAs || 'MIM-ADMIN-01');
+    if (right && h.apiLatency)      right.textContent = 'API: ' + h.apiLatency + ' | UPTIME: ' + h.uptime + ' | LOG: ' + h.logRate;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     SHEET URL FETCH BAR
+  ══════════════════════════════════════════════════════════════════ */
+
+  function initSheetFetch() {
+    var btn   = $('sheetFetchBtn');
+    var input = $('sheetUrlInput');
+    if (!btn || !input) return;
+    btn.addEventListener('click', _doSheetFetch);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') _doSheetFetch();
+    });
+  }
+
+  function _sfbStatus(msg, ok) {
+    var el = $('sfbStatus');
+    if (!el) return;
+    el.textContent  = msg;
+    el.className    = 'sfb-status' + (ok === true ? ' sfb-ok' : ok === false ? ' sfb-err' : '');
+  }
+
+  /** Regex-extracts { sheetId, gid } from any Google Sheets URL. */
+  function _parseSheetUrlClient(url) {
+    var idM = url.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]{20,})/);
+    if (!idM) return null;
+    var gidM = url.match(/[?&#]gid=(\d+)/);
+    return { sheetId: idM[1], gid: gidM ? gidM[1] : '' };
+  }
+
+  function _doSheetFetch() {
+    var input = $('sheetUrlInput');
+    var btn   = $('sheetFetchBtn');
+    var raw   = (input && input.value.trim()) || '';
+    if (!raw) { _sfbStatus('Paste a Google Sheet URL first.', false); return; }
+
+    var parsed = _parseSheetUrlClient(raw);
+    if (!parsed) { _sfbStatus('Could not extract Sheet ID from URL.', false); return; }
+
+    btn.disabled    = true;
+    btn.textContent = 'Fetching…';
+    _sfbStatus('');
+
+    if (typeof google !== 'undefined' && google.script) {
+      // GAS context — server-side fetch bypasses CORS
+      google.script.run
+        .withSuccessHandler(function (res) {
+          btn.disabled    = false;
+          btn.textContent = 'Fetch';
+          if (!res.ok) { _sfbStatus(res.error || 'Fetch failed.', false); return; }
+          _applyFetchedRows(res.rows, res._meta);
+        })
+        .withFailureHandler(function (e) {
+          btn.disabled    = false;
+          btn.textContent = 'Fetch';
+          _sfbStatus((e && e.message) ? e.message : 'Fetch failed.', false);
+        })
+        .fetchSheetByUrl(parsed.sheetId, parsed.gid);
+    } else {
+      // Non-GAS context — direct CSV export (works when sheet is publicly shared)
+      var csvUrl = 'https://docs.google.com/spreadsheets/d/' + parsed.sheetId +
+                   '/export?format=csv' + (parsed.gid ? '&gid=' + parsed.gid : '');
+      fetch(csvUrl)
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.text();
+        })
+        .then(function (csvText) {
+          btn.disabled    = false;
+          btn.textContent = 'Fetch';
+          var rows = _csvToCanonical(csvText);
+          _applyFetchedRows(rows, { strategy: 'csv-direct' });
+        })
+        .catch(function (err) {
+          btn.disabled    = false;
+          btn.textContent = 'Fetch';
+          _sfbStatus((err && err.message) ? err.message : 'Fetch failed. Ensure the sheet is publicly shared.', false);
+        });
+    }
+  }
+
+  /** Loads fetched rows into the live table without touching mock data. */
+  function _applyFetchedRows(rows, meta) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      _sfbStatus('No rows returned.', false);
+      return;
+    }
+    _allRows = rows;
+    if (window._dashData) window._dashData.rows = rows;
+    showDashboard();
+    renderActiveTab();
+    _sfbStatus(rows.length + ' rows loaded' + (meta && meta.sheetName ? ' from "' + meta.sheetName + '"' : '') + '.', true);
+  }
+
+  /* ── Client-side CSV parser + canonical mapper (non-GAS fallback) ── */
+
+  var _CLIENT_ALIASES = {
+    bug_id:                    ['bug_id','bug id','id','bugid','issue id','case id'],
+    iem_escalation_number:     ['iem_escalation_number','iem escalation number','escalation #','escalation number','iem escalation #','vector case','iem bug/vector case'],
+    current_assignee_ldap:     ['current_assignee_ldap','current assignee ldap','assignee','requesting poc','assigned to','owner'],
+    product_name:              ['product_name','product name','product area','product','service'],
+    priority:                  ['priority','severity','p0/p1','sev'],
+    customer_name:             ['customer_name','customer name','customer','account','company'],
+    subject:                   ['subject','title','issue','summary','description'],
+    last_update:               ['last_update','last update','update','latest update','notes'],
+    time_to_first_update_mins: ['time_to_first_update_mins','time to first update (mins)','fmr (mins)','fmr','first response mins','tfu'],
+    resolution_hours:          ['resolution_hours','resolution hours','age (hours)','resolution time','hours to close'],
+    created_timestamp:         ['created_timestamp','created at','created','opened at','date opened','date created'],
+    closed_timestamp:          ['closed_timestamp','closed at','closed','resolved at','date closed'],
+    status:                    ['status','state','current status'],
+    iem_escalation_type:       ['iem_escalation_type','iem escalation type','escalation type','type','category']
+  };
+
+  var _CLIENT_ALIAS_LOOKUP = (function () {
+    var m = {};
+    Object.keys(_CLIENT_ALIASES).forEach(function (canon) {
+      _CLIENT_ALIASES[canon].forEach(function (alias) { m[alias.toLowerCase()] = canon; });
+    });
+    return m;
+  }());
+
+  function _csvToCanonical(text) {
+    var lines = text.trim().split(/\r?\n/);
+    if (lines.length < 2) return [];
+    var headers = _splitCsvRow(lines[0]);
+    var headerMap = {};   // colIndex → canonicalKey
+    headers.forEach(function (h, i) {
+      var canon = _CLIENT_ALIAS_LOOKUP[h.toLowerCase().trim()];
+      if (canon) headerMap[i] = canon;
+    });
+    return lines.slice(1).map(function (line, idx) {
+      var vals = _splitCsvRow(line);
+      var row  = {};
+      Object.keys(headerMap).forEach(function (i) { row[headerMap[i]] = (vals[i] || '').trim(); });
+      if (!row.bug_id) row.bug_id = 'ext-' + idx;
+      return row;
+    });
+  }
+
+  function _splitCsvRow(row) {
+    var result = [], cur = '', inQ = false;
+    for (var i = 0; i < row.length; i++) {
+      var c = row[i];
+      if (c === '"') {
+        if (inQ && row[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
+      else { cur += c; }
+    }
+    result.push(cur);
+    return result;
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     SETTINGS PANEL
+  ══════════════════════════════════════════════════════════════════ */
+
+  var _settingsState = {
+    dataSource: 'publicSheet',
+    sheetUrl:   '',
+    sheetId:    '',
+    sheetGid:   ''
+  };
+
+  function initSettings() {
+    var settingsBtn  = $('settingsBtn');
+    var backdrop     = $('settingsBackdrop');
+    var closeBtn     = $('settingsCloseBtn');
+    var cancelBtn    = $('settingsCancelBtn');
+    var saveBtn      = $('settingsSaveBtn');
+    var discoverBtn  = $('discoverTabsBtn');
+    var testBtn      = $('testConnBtn');
+    var urlInput     = $('settingsSheetUrl');
+    var idInput      = $('settingsSheetId');
+    var gidManual    = $('settingsGidManual');
+    var sourceBtns   = document.querySelectorAll('.source-btn');
+
+    if (!settingsBtn || !backdrop) return;
+
+    // Open
+    settingsBtn.addEventListener('click', openSettings);
+
+    // Close / cancel
+    function closeSettings() {
+      backdrop.style.display = 'none';
+      backdrop.setAttribute('aria-hidden', 'true');
+    }
+    closeBtn.addEventListener('click', closeSettings);
+    cancelBtn.addEventListener('click', closeSettings);
+    backdrop.addEventListener('click', function (e) {
+      if (e.target === backdrop) closeSettings();
+    });
+
+    // Source toggle
+    sourceBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        sourceBtns.forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        _settingsState.dataSource = btn.dataset.source;
+        _updateSourceSections();
+      });
+    });
+
+    // Auto-extract sheet ID from pasted URL
+    urlInput.addEventListener('input', function () {
+      var extracted = _parseSheetUrl(urlInput.value.trim());
+      if (extracted) {
+        idInput.value = extracted;
+        _settingsState.sheetId = extracted;
+      }
+      _settingsState.sheetUrl = urlInput.value.trim();
+    });
+    idInput.addEventListener('input', function () {
+      _settingsState.sheetId = idInput.value.trim();
+    });
+    gidManual.addEventListener('input', function () {
+      _settingsState.sheetGid = gidManual.value.trim();
+    });
+
+    // Discover tabs
+    discoverBtn.addEventListener('click', handleDiscoverTabs);
+
+    // Test connection
+    testBtn.addEventListener('click', handleTestConnection);
+
+    // Save
+    saveBtn.addEventListener('click', handleSaveConfig);
+
+    _updateSourceSections();
+  }
+
+  function openSettings() {
+    var backdrop = $('settingsBackdrop');
+    if (!backdrop) return;
+    backdrop.style.display = '';
+    backdrop.setAttribute('aria-hidden', 'false');
+    _settingsStatusHide();
+
+    // Load current config from GAS
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (cfg) { _applyConfig(cfg); })
+        .withFailureHandler(function ()    { /* use defaults */ })
+        .getSheetConfig();
+    }
+  }
+
+  function _applyConfig(cfg) {
+    if (!cfg) return;
+    _settingsState.dataSource = cfg.dataSource || 'publicSheet';
+    _settingsState.sheetUrl   = cfg.sheetUrl   || '';
+    _settingsState.sheetId    = cfg.sheetId    || '';
+    _settingsState.sheetGid   = cfg.sheetGid   || '';
+
+    var urlInput  = $('settingsSheetUrl');
+    var idInput   = $('settingsSheetId');
+    var gidManual = $('settingsGidManual');
+    var apiUrl    = $('settingsApiUrl');
+    if (urlInput)  urlInput.value  = _settingsState.sheetUrl;
+    if (idInput)   idInput.value   = _settingsState.sheetId;
+    if (gidManual) gidManual.value = _settingsState.sheetGid;
+    if (apiUrl && cfg.apiUrl) apiUrl.value = cfg.apiUrl;
+
+    // Update source toggle
+    var sourceBtns = document.querySelectorAll('.source-btn');
+    sourceBtns.forEach(function (btn) {
+      btn.classList.toggle('active', btn.dataset.source === _settingsState.dataSource);
+    });
+    _updateSourceSections();
+  }
+
+  function _updateSourceSections() {
+    var sheetSection  = $('sheetSection');
+    var apiSection    = $('apiSection');
+    var hintEl        = $('sourceHint');
+    var src           = _settingsState.dataSource;
+
+    if (sheetSection)  sheetSection.style.display  = (src === 'publicSheet') ? '' : 'none';
+    if (apiSection)    apiSection.style.display     = (src === 'api')         ? '' : 'none';
+
+    var hints = {
+      mock:        'Dashboard will use built-in mock data. No external source needed.',
+      publicSheet: 'Pull live data from a Google Sheet using the sheet ID or URL below.',
+      api:         'Pull live data from a REST API endpoint.'
+    };
+    if (hintEl) hintEl.textContent = hints[src] || '';
+  }
+
+  /**
+   * Extracts the spreadsheet ID from a Google Sheets URL, or returns the
+   * raw string if it already looks like a bare ID.
+   */
+  function _parseSheetUrl(urlOrId) {
+    if (!urlOrId) return '';
+    var m = urlOrId.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]{20,})/);
+    if (m) return m[1];
+    if (/^[A-Za-z0-9_-]{20,}$/.test(urlOrId)) return urlOrId;
+    return '';
+  }
+
+  /* ── Discover tabs ─────────────────────────────────────────────── */
+  function handleDiscoverTabs() {
+    var idInput   = $('settingsSheetId');
+    var urlInput  = $('settingsSheetUrl');
+    var discoverBtn = $('discoverTabsBtn');
+    var id = (idInput && idInput.value.trim()) || _parseSheetUrl(urlInput && urlInput.value.trim());
+    if (!id) {
+      _settingsStatusShow(false, 'Enter a Sheet URL or Sheet ID first.');
+      return;
+    }
+
+    discoverBtn.disabled    = true;
+    discoverBtn.textContent = 'Discovering…';
+
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (res) {
+          discoverBtn.disabled    = false;
+          discoverBtn.innerHTML   = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Discover Tabs';
+          if (!res.ok) { _settingsStatusShow(false, res.error || 'Failed to list tabs.'); return; }
+          _renderTabList(res.tabs || []);
+        })
+        .withFailureHandler(function (e) {
+          discoverBtn.disabled    = false;
+          discoverBtn.innerHTML   = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Discover Tabs';
+          _settingsStatusShow(false, (e && e.message) ? e.message : 'Could not reach sheet.');
+        })
+        .listSheetTabs(id);
+    } else {
+      // Local dev: simulate
+      discoverBtn.disabled    = false;
+      discoverBtn.innerHTML   = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Discover Tabs';
+      _renderTabList([
+        { name:'Escalations', gid:'0',          rowCount:42 },
+        { name:'OnCall',      gid:'1234567890', rowCount:6  },
+        { name:'CommsLog',    gid:'9876543210', rowCount:88 }
+      ]);
+    }
+  }
+
+  function _renderTabList(tabs) {
+    var section  = $('tabListSection');
+    var listEl   = $('tabList');
+    var hintEl   = $('tabListHint');
+    var manualEl = $('manualGidSection');
+    if (!section || !listEl) return;
+
+    listEl.innerHTML = '';
+    if (!tabs || tabs.length === 0) {
+      hintEl.textContent = 'No tabs found in this spreadsheet.';
+      section.style.display  = '';
+      if (manualEl) manualEl.style.display = '';
+      return;
+    }
+
+    tabs.forEach(function (tab) {
+      var item = document.createElement('div');
+      item.className = 'tab-list-item';
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', 'false');
+      item.dataset.gid  = tab.gid;
+      item.dataset.name = tab.name;
+      item.innerHTML =
+        '<span class="tli-name">' + _esc(tab.name) + '</span>' +
+        '<span class="tli-meta">GID: ' + _esc(tab.gid) + ' &nbsp;·&nbsp; ' + tab.rowCount + ' rows</span>';
+      item.addEventListener('click', function () {
+        listEl.querySelectorAll('.tab-list-item').forEach(function (el) {
+          el.classList.remove('selected');
+          el.setAttribute('aria-selected', 'false');
+        });
+        item.classList.add('selected');
+        item.setAttribute('aria-selected', 'true');
+        var gidInput = $('settingsGid');
+        if (gidInput) gidInput.value = tab.gid;
+        _settingsState.sheetGid = tab.gid;
+        if (hintEl) hintEl.textContent = 'Selected: "' + tab.name + '" (GID ' + tab.gid + ')';
+      });
+      listEl.appendChild(item);
+    });
+
+    if (hintEl) hintEl.textContent = 'Click the tab that contains your escalation data.';
+    section.style.display  = '';
+    if (manualEl) manualEl.style.display = '';
+  }
+
+  /* ── Test connection ──────────────────────────────────────────── */
+  function handleTestConnection() {
+    var testBtn = $('testConnBtn');
+    var id      = _settingsState.sheetId || _parseSheetUrl(_settingsState.sheetUrl);
+    if (_settingsState.dataSource === 'mock') {
+      _settingsStatusShow(true, 'Mock mode — no external connection needed.');
+      return;
+    }
+    if (!id && _settingsState.dataSource === 'publicSheet') {
+      _settingsStatusShow(false, 'Enter a Sheet URL or Sheet ID first.');
+      return;
+    }
+
+    testBtn.disabled    = true;
+    testBtn.textContent = 'Testing…';
+
+    var cfg = {
+      sheetUrl: _settingsState.sheetUrl,
+      sheetId:  id,
+      sheetGid: _settingsState.sheetGid
+    };
+
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (res) {
+          testBtn.disabled = false;
+          testBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Test Connection';
+          if (res.success) {
+            _settingsStatusShow(true,
+              'Connected via ' + res.fetchMethod + ' — ' + res.rowCount + ' rows' +
+              (res.tabName ? ' on tab "' + res.tabName + '"' : '') + '.');
+          } else {
+            _settingsStatusShow(false, res.error || 'Connection failed.');
+          }
+        })
+        .withFailureHandler(function (e) {
+          testBtn.disabled = false;
+          testBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Test Connection';
+          _settingsStatusShow(false, (e && e.message) ? e.message : 'Test failed.');
+        })
+        .testSheetConnection(cfg);
+    } else {
+      testBtn.disabled = false;
+      testBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Test Connection';
+      _settingsStatusShow(true, 'Local dev — mock connection OK. 24 rows.');
+    }
+  }
+
+  /* ── Save & reload ────────────────────────────────────────────── */
+  function handleSaveConfig() {
+    var saveBtn = $('settingsSaveBtn');
+    var apiUrl  = $('settingsApiUrl');
+    var cfg = {
+      dataSource: _settingsState.dataSource,
+      sheetUrl:   _settingsState.sheetUrl,
+      sheetId:    _settingsState.sheetId || _parseSheetUrl(_settingsState.sheetUrl),
+      sheetGid:   _settingsState.sheetGid,
+      apiUrl:     apiUrl ? apiUrl.value.trim() : ''
+    };
+
+    saveBtn.disabled    = true;
+    saveBtn.textContent = 'Saving…';
+
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (res) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Save &amp; Reload';
+          if (res && res.ok) {
+            // Also flip the frontend endpoint type so the running hook picks up the new source
+            DATA_ENDPOINT.type = cfg.dataSource === 'publicSheet' ? 'gas'
+                               : cfg.dataSource === 'mock'        ? 'mock'
+                               : cfg.dataSource === 'api'         ? 'rest'
+                               : 'gas';
+            $('settingsBackdrop').style.display = 'none';
+            showToast('Settings saved. Reloading data…', 2000);
+            setTimeout(loadDashboard, 2200);
+          } else {
+            _settingsStatusShow(false, (res && res.error) ? res.error : 'Save failed.');
+          }
+        })
+        .withFailureHandler(function (e) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Save &amp; Reload';
+          _settingsStatusShow(false, (e && e.message) ? e.message : 'Save failed.');
+        })
+        .saveSheetConfig(cfg);
+    } else {
+      // Local dev: just reload with mock
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Save &amp; Reload';
+      $('settingsBackdrop').style.display = 'none';
+      showToast('Settings saved (local dev — using mock data).', 2000);
+      setTimeout(loadDashboard, 2200);
+    }
+  }
+
+  /* ── Settings status helpers ──────────────────────────────────── */
+  function _settingsStatusShow(ok, msg) {
+    var el   = $('settingsStatus');
+    var icon = $('settingsStatusIcon');
+    var msgEl= $('settingsStatusMsg');
+    if (!el) return;
+    el.style.display = '';
+    el.className = 'settings-status ' + (ok ? 'settings-status-ok' : 'settings-status-err');
+    if (icon) icon.textContent = ok ? '✓' : '✗';
+    if (msgEl) msgEl.textContent = msg || '';
+  }
+  function _settingsStatusHide() {
+    var el = $('settingsStatus');
+    if (el) el.style.display = 'none';
+  }
+
+  /* HTML-escape helper (already used by other parts, safe to redefine locally) */
+  function _esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  /* ── Toast ───────────────────────────────────────────────────── */
+  function showToast(msg, ms) {
+    var el = $('toast');
+    if (!el) return;
+    el.textContent   = msg;
+    el.style.display = '';
+    clearTimeout(el._tid);
+    el._tid = setTimeout(function () { el.style.display = 'none'; }, ms || 2500);
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
+     BOOT
+  ══════════════════════════════════════════════════════════════════ */
+  function loadDashboard() {
+    showLoading();
+    useDashboardData.fetch();
+  }
+  window.loadDashboard = loadDashboard;
+
+  document.addEventListener('DOMContentLoaded', function () {
+    initTheme();
+    initClock();
+    initTabs();
+    initPagination();
+    initFilterPopup();
+    initModal();
+    initLogo();
+    initNotifications();
+    initSheetFetch();
+    initSettings();
+
+    // Subscribe to dashboard data
+    useDashboardData.subscribe('change', function (data) {
+      window._dashData = data;
+      _allRows = data.rows || [];
+      updateFooter({});
+      showDashboard();
+      renderActiveTab();
+      initAnalytics();
+    });
+    useDashboardData.subscribe('error', function (err) {
+      showError(err && err.message ? err.message : 'Failed to load dashboard data.');
+    });
+
+    // Subscribe to current user (avatar)
+    useCurrentUser.subscribe(function (u) {
+      var el = $('userAvatar');
+      if (!el || !u) return;
+      el.textContent = u.initials;
+      el.title       = 'Logged in as ' + u.name;
+      el.setAttribute('aria-label', 'User: ' + u.name);
+    });
+
+    useCurrentUser.fetch();
+    loadDashboard();
+  });
+
+}());
+</script>

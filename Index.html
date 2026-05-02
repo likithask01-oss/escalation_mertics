@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IEM Escalations Dashboard</title>
+  <?!= include('Styles') ?>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <!-- GAS template vars — evaluated server-side; literal strings in local browser preview -->
+  <script>var GAS_LOGO_URL='<?= logoUrl ?>',GAS_USER_NAME='<?= userName ?>';</script>
+</head>
+<body class="theme-dark" data-theme="dark">
+
+  <!-- ── TOP NAV ───────────────────────────────────────────────────────── -->
+  <nav class="topnav" role="banner">
+    <div class="topnav-left">
+      <div class="logo-block" aria-hidden="true">
+        <img id="teamLogo" src="" alt="IEM Team" style="display:none;width:28px;height:28px;object-fit:contain;border-radius:3px">
+        <span id="teamLogoFallback" style="font-size:0.58rem;font-weight:900;letter-spacing:-0.01em">IEM</span>
+      </div>
+      <div class="title-block">
+        <span class="team-label">IEM TEAM</span>
+        <span class="dashboard-title">IEM Escalations Dashboard</span>
+      </div>
+    </div>
+    <div class="topnav-right">
+      <div class="clock-block" aria-live="polite" aria-label="US Pacific Time">
+        <span class="clock-label">US/PACIFIC TIME</span>
+        <span class="clock-value" id="clock">--:--:--</span>
+      </div>
+      <!-- Settings gear -->
+      <button class="icon-btn settings-btn" id="settingsBtn" aria-label="Data source settings" title="Settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+      <button class="icon-btn theme-toggle" id="themeToggleBtn" aria-label="Toggle colour theme" title="Toggle theme">
+        <svg id="themeIconDark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg id="themeIconLight" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <!-- Notification bell + dropdown -->
+      <div class="notif-wrap" id="notifWrap">
+        <button class="icon-btn notif-btn" id="notifBtn" aria-label="Notifications" title="Notification Centre" aria-expanded="false" aria-haspopup="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="notif-badge" id="notifBadge" style="display:none">0</span>
+        </button>
+        <div class="notif-dropdown" id="notifDropdown" role="dialog" aria-label="Notifications" style="display:none">
+          <div class="notif-dd-hdr">
+            <span class="notif-dd-title">IEM Bug Notifications</span>
+            <button class="notif-mark-all" id="markAllReadBtn">Mark all read</button>
+          </div>
+          <div id="notifList" class="notif-list"></div>
+        </div>
+      </div>
+      <div class="avatar" id="userAvatar" title="Logged in user" aria-label="User avatar">IEM</div>
+    </div>
+  </nav>
+
+  <!-- ── MAIN TAB BAR (4 tabs) ─────────────────────────────────────────── -->
+  <div class="tabbar" role="tablist" aria-label="Escalation categories">
+    <button class="tab active" role="tab" aria-selected="true"  data-tab="EXEC_ESCALATIONS" id="tab-EXEC">Exec Escalations</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="MCS"               id="tab-MCS">MCS</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="CUF_ESCALATIONS"   id="tab-CUF">CUF Escalations</button>
+    <button class="tab"        role="tab" aria-selected="false" data-tab="SOCIAL_CARE"       id="tab-SOC">Social Care Escalation</button>
+  </div>
+
+  <!-- ── CUF SUB-TAB BAR (visible only when CUF tab is active) ─────────── -->
+  <div class="subtabbar" id="cufSubTabBar" style="display:none" role="tablist" aria-label="CUF sub-categories">
+    <button class="subtab active" role="tab" aria-selected="true"  data-cuf="CUF_P0_P1"   >P0 / P1</button>
+    <button class="subtab"        role="tab" aria-selected="false" data-cuf="CUF_GUP"     >gUP</button>
+    <button class="subtab"        role="tab" aria-selected="false" data-cuf="CUF_BILLING" >Billing</button>
+  </div>
+
+  <!-- ── SHEET URL FETCH BAR ───────────────────────────────────────────── -->
+  <div class="sheet-fetch-bar" id="sheetFetchBar" role="search" aria-label="Fetch from Google Sheet">
+    <label class="sfb-label" for="sheetUrlInput">Google Sheet URL</label>
+    <input  class="sfb-input" id="sheetUrlInput" type="text"
+            placeholder="https://docs.google.com/spreadsheets/d/…"
+            autocomplete="off" spellcheck="false" aria-label="Google Sheet URL" />
+    <button class="sfb-btn" id="sheetFetchBtn" type="button">Fetch</button>
+    <span   class="sfb-status" id="sfbStatus" aria-live="polite"></span>
+  </div>
+
+  <!-- ── MAIN ──────────────────────────────────────────────────────────── -->
+  <main class="main-content" role="main">
+
+    <!-- Loading -->
+    <div id="loadingState" class="state-panel" role="status" aria-live="polite">
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Loading dashboard data…</p>
+    </div>
+
+    <!-- Error -->
+    <div id="errorState" class="state-panel" style="display:none" role="alert">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <p id="errorMsg">Failed to load data.</p>
+      <button class="btn-secondary" onclick="loadDashboard()">Retry</button>
+    </div>
+
+    <!-- ── UNIFIED DASHBOARD PANEL ─────────────────────────────────────── -->
+    <div id="dashboardContent" style="display:none">
+
+      <!-- Sub-header -->
+      <div class="subheader" id="panelSubheader">
+        <span class="section-label" id="activeTabLabel">EXEC ESCALATIONS</span>
+        <span class="pill" id="activeTabCount"></span>
+      </div>
+
+      <!-- ── SECTION 1: LIVE ESCALATIONS TABLE ───────────────────────── -->
+      <section class="card" id="liveEscCard">
+        <div class="card-header">
+          <span class="section-label">Live Escalations</span>
+          <div class="header-pills">
+            <span class="pill">ALL</span>
+            <span class="pill pill-red" id="activeBadge">0 ACTIVE</span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="incident-table" id="liveEscTable" aria-label="Live escalations">
+            <!-- thead is populated dynamically by initColumnHeaders() -->
+            <thead><tr id="tableHeaderRow"></tr></thead>
+            <tbody id="liveEscTbody"></tbody>
+          </table>
+        </div>
+        <!-- Pagination controls -->
+        <div class="pagination-bar" id="paginationBar" style="display:none">
+          <span class="page-info" id="pageInfo">Page 1 of 1</span>
+          <div class="page-btns">
+            <button class="page-btn" id="prevPageBtn" disabled>&#8592; Prev</button>
+            <button class="page-btn" id="nextPageBtn" disabled>Next &#8594;</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Inline comms blast — rendered below table, collapsed by default -->
+      <div id="commsPanel"></div>
+
+      <!-- ── SECTION 2: PERFORMANCE ANALYTICS ────────────────────────── -->
+      <section class="analytics-section" id="analyticsSection" aria-label="Performance Analytics">
+
+        <div class="analytics-header">
+          <div class="analytics-header-left">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            <span class="analytics-title">Performance Analytics</span>
+          </div>
+          <div class="timeline-filter" role="group" aria-label="Select time period">
+            <button class="timeline-btn" data-period="1W">1W</button>
+            <button class="timeline-btn" data-period="1M">1M</button>
+            <button class="timeline-btn active" data-period="3M">3M</button>
+            <button class="timeline-btn" data-period="6M">6M</button>
+            <button class="timeline-btn" data-period="Q">Quarterly</button>
+            <button class="timeline-btn" data-period="Y">Yearly</button>
+          </div>
+        </div>
+
+        <div class="analytics-row">
+
+          <div class="analytics-left card">
+            <div class="analytics-panel-hdr">
+              <span class="kpi-tag" id="kpiTag">KR2</span>
+              <span class="analytics-panel-title" id="chartTitle">IEM Escalations</span>
+            </div>
+            <div class="chart-container-wrap">
+              <canvas id="mainChart" aria-label="Bar chart: IEM escalation count by month"></canvas>
+            </div>
+            <div class="chart-legend">
+              <span class="legend-item"><span class="legend-swatch swatch-bar"></span>Count</span>
+            </div>
+          </div>
+
+          <div class="analytics-right card">
+            <div class="analytics-panel-hdr">
+              <span class="analytics-panel-title" id="rawDataTitle">RawData</span>
+              <span class="rawdata-count" id="rawDataCount"></span>
+            </div>
+            <div class="rawdata-wrap">
+              <table class="rawdata-table" aria-label="Historical raw data">
+                <thead>
+                  <tr>
+                    <th>Month</th>
+                    <th>Bug ID</th>
+                    <th>Escalation #</th>
+                    <th>Subject</th>
+                    <th>Created</th>
+                    <th>First Assign</th>
+                    <th>First Update</th>
+                  </tr>
+                </thead>
+                <tbody id="rawDataTbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </div><!-- /dashboardContent -->
+  </main>
+
+  <!-- ── FOOTER ────────────────────────────────────────────────────────── -->
+  <footer class="footer" role="contentinfo">
+    <div class="footer-left" id="footer-left">v4.2.1-RELEASE | AUTHENTICATED: MIM-ADMIN-01</div>
+    <div class="footer-right" id="footer-right">API: 12MS | UPTIME: 99.98% | LOG: 12.4K/S</div>
+  </footer>
+
+  <!-- ── COMMS LOG MODAL ────────────────────────────────────────────────── -->
+  <div class="modal-backdrop" id="logModalBackdrop" aria-hidden="true" style="display:none"
+       role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalTitle">Comms Log</h3>
+        <button class="icon-btn modal-close" id="modalCloseBtn" aria-label="Close communications log">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="modalLoading" class="state-panel compact"><div class="spinner"></div><p>Loading log…</p></div>
+        <div id="modalError" class="state-panel compact" style="display:none" role="alert"><p id="modalErrorMsg">Failed to load log.</p></div>
+        <div id="modalLog" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SHARED COLUMN FILTER POPUP ────────────────────────────────────── -->
+  <div class="col-filter-popup" id="colFilterPopup" style="display:none" role="dialog" aria-label="Column filter">
+    <input  class="col-filter-text"      id="colFilterInput"    type="text" placeholder="Filter…" aria-label="Filter value" autocomplete="off">
+    <button class="col-filter-clear-btn" id="colFilterClearBtn" type="button">Clear</button>
+  </div>
+
+  <!-- ── TOAST ─────────────────────────────────────────────────────────── -->
+  <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true" style="display:none"></div>
+
+  <!-- ── SETTINGS MODAL ────────────────────────────────────────────────── -->
+  <div class="modal-backdrop settings-modal-backdrop" id="settingsBackdrop" aria-hidden="true" style="display:none"
+       role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal settings-modal">
+
+      <div class="modal-header">
+        <h3 class="modal-title" id="settingsTitle">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Data Source Settings
+        </h3>
+        <button class="icon-btn modal-close" id="settingsCloseBtn" aria-label="Close settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <div class="modal-body settings-body">
+
+        <!-- Source toggle -->
+        <div class="settings-section">
+          <div class="settings-section-title">Data Source</div>
+          <div class="source-toggle" role="group" aria-label="Select data source">
+            <button class="source-btn" data-source="mock"        type="button">Mock</button>
+            <button class="source-btn active" data-source="publicSheet" type="button">Google Sheet</button>
+            <button class="source-btn" data-source="api"         type="button">REST API</button>
+          </div>
+          <p class="settings-hint" id="sourceHint">Pull live data from a Google Sheet using the sheet ID or URL below.</p>
+        </div>
+
+        <!-- Sheet URL / ID -->
+        <div class="settings-section" id="sheetSection">
+          <div class="settings-section-title">Google Sheet</div>
+
+          <div class="settings-field">
+            <label class="settings-label" for="settingsSheetUrl">Sheet URL <span class="settings-optional">(or paste the URL)</span></label>
+            <input class="settings-input" id="settingsSheetUrl" type="text"
+                   placeholder="https://docs.google.com/spreadsheets/d/…"
+                   autocomplete="off" spellcheck="false" />
+          </div>
+
+          <div class="settings-field">
+            <label class="settings-label" for="settingsSheetId">Sheet ID</label>
+            <div class="settings-row">
+              <input class="settings-input" id="settingsSheetId" type="text"
+                     placeholder="e.g. 1SKir-kwioaUyPGkLh9y7HnYkKvwkFar8aWcU0vj8T1Q"
+                     autocomplete="off" spellcheck="false" />
+              <button class="btn-secondary discover-btn" id="discoverTabsBtn" type="button">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Discover Tabs
+              </button>
+            </div>
+            <p class="settings-hint">Leave blank to auto-extract from the URL above.</p>
+          </div>
+
+          <!-- Tab list (hidden until "Discover Tabs" is clicked) -->
+          <div class="settings-field" id="tabListSection" style="display:none">
+            <label class="settings-label" for="settingsGid">Sheet Tab <span class="settings-optional">(select the incidents tab)</span></label>
+            <div class="tab-list" id="tabList" role="listbox" aria-label="Available sheet tabs"></div>
+            <!-- Hidden input keeps the selected GID -->
+            <input type="hidden" id="settingsGid" value="">
+            <p class="settings-hint" id="tabListHint"></p>
+          </div>
+
+          <div class="settings-field" id="manualGidSection" style="display:none">
+            <label class="settings-label" for="settingsGidManual">Tab GID <span class="settings-optional">(if known)</span></label>
+            <input class="settings-input" id="settingsGidManual" type="text"
+                   placeholder="e.g. 1238638795" autocomplete="off" />
+          </div>
+        </div>
+
+        <!-- REST API URL (shown only when source=api) -->
+        <div class="settings-section" id="apiSection" style="display:none">
+          <div class="settings-section-title">REST API</div>
+          <div class="settings-field">
+            <label class="settings-label" for="settingsApiUrl">API Base URL</label>
+            <input class="settings-input" id="settingsApiUrl" type="text"
+                   placeholder="https://api.example.com/v1"
+                   autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+
+        <!-- Test / status area -->
+        <div class="settings-test-area">
+          <button class="btn-secondary test-conn-btn" id="testConnBtn" type="button">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            Test Connection
+          </button>
+          <div class="settings-status" id="settingsStatus" style="display:none">
+            <span class="settings-status-icon" id="settingsStatusIcon"></span>
+            <span class="settings-status-msg"  id="settingsStatusMsg"></span>
+          </div>
+        </div>
+
+      </div><!-- /settings-body -->
+
+      <div class="modal-footer settings-footer">
+        <button class="btn-secondary" id="settingsCancelBtn" type="button">Cancel</button>
+        <button class="btn-primary"   id="settingsSaveBtn"   type="button">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+          Save &amp; Reload
+        </button>
+      </div>
+
+    </div><!-- /settings-modal -->
+  </div><!-- /settingsBackdrop -->
+
+  <?!= include('Hooks') ?>
+  <?!= include('ClientScript') ?>
+</body>
+</html>
