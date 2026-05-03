@@ -1528,4 +1528,268 @@ body {
 .modal-footer {
   flex-shrink: 0;
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   EXECUTIVE PULSE BANNER
+══════════════════════════════════════════════════════════════════════ */
+.pulse-banner {
+  display: flex;
+  gap: 12px;
+  padding: 12px 20px 0;
+  flex-wrap: wrap;
+}
+
+.pulse-card {
+  flex: 1;
+  min-width: 160px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  transition: border-color 0.15s;
+}
+.pulse-card:hover { border-color: var(--accent-blue); }
+
+.pulse-card-icon {
+  width: 34px; height: 34px;
+  border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.72rem; font-weight: 900;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+}
+.pulse-icon-rev   { background: rgba(16,185,129,0.12);  color: var(--accent-green); }
+.pulse-icon-sla   { background: rgba(96,165,250,0.12);  color: var(--accent-blue);  font-size: 0.58rem; }
+.pulse-icon-block { background: rgba(239,68,68,0.12);   color: var(--accent-red);   font-size: 1rem; }
+.pulse-icon-res   { background: rgba(245,158,11,0.12);  color: var(--accent-amber); font-size: 0.9rem; }
+
+.pulse-card-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.pulse-card-value {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.text-truncate-val {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 120px;
+}
+
+.pulse-card-label {
+  font-size: 0.60rem;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+.pulse-sublabel {
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--text-faint);
+}
+.pulse-est { color: var(--text-faint); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+.kpi-good { color: var(--accent-green) !important; }
+.kpi-warn { color: var(--accent-amber) !important; }
+.kpi-bad  { color: var(--accent-red)   !important; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   EXEC SUMMARY
+══════════════════════════════════════════════════════════════════════ */
+.exec-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 20px 0;
+  padding: 9px 14px;
+  background: rgba(96,165,250,0.06);
+  border: 1px solid rgba(96,165,250,0.18);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.theme-light .exec-summary {
+  background: rgba(37,99,235,0.04);
+  border-color: rgba(37,99,235,0.15);
+}
+.exec-summary-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  flex-shrink: 0;
+  animation: pulse-dot 2.5s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.75); }
+}
+.exec-summary-text { flex: 1; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   TABLE — TIER GROUP HEADERS
+══════════════════════════════════════════════════════════════════════ */
+.tier-group-header td {
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 5px 12px;
+  pointer-events: none;
+}
+.tier-icon {
+  font-size: 0.62rem;
+  margin-right: 6px;
+  color: var(--text-muted);
+}
+.tier-label {
+  font-size: 0.60rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-right: 8px;
+}
+.tier-count {
+  font-size: 0.60rem;
+  font-weight: 500;
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   TABLE — ROW STATES (P0 pulse, Closed dim)
+══════════════════════════════════════════════════════════════════════ */
+@keyframes row-pulse-glow {
+  0%, 100% { background-color: transparent; }
+  50%       { background-color: rgba(239,68,68,0.06); }
+}
+.row-pulse-p0 {
+  animation: row-pulse-glow 2.8s ease-in-out infinite;
+}
+.row-pulse-p0 td:first-child {
+  border-left: 2px solid var(--accent-red);
+}
+
+.row-dim {
+  opacity: 0.45;
+}
+.row-dim:hover { opacity: 0.75; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   TABLE — AGE HEATMAP CELLS
+══════════════════════════════════════════════════════════════════════ */
+.age-cell.age-warn {
+  color: var(--accent-amber);
+  font-weight: 600;
+}
+.age-cell.age-critical {
+  color: var(--accent-red);
+  font-weight: 700;
+  background: rgba(239,68,68,0.08);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+/* ── Impact ($) column cell ─────────────────────────────────────── */
+.td-impact {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.70rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ANALYTICS — 3-CHART GRID
+══════════════════════════════════════════════════════════════════════ */
+.analytics-charts-grid {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr;
+  gap: 12px;
+  padding: 12px 0 0;
+}
+@media (max-width: 900px) {
+  .analytics-charts-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 600px) {
+  .analytics-charts-grid { grid-template-columns: 1fr; }
+}
+
+.analytics-chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.analytics-chart-card .analytics-panel-hdr {
+  padding: 10px 14px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.analytics-chart-card .chart-container-wrap {
+  flex: 1;
+  position: relative;
+  height: 180px;
+  padding: 10px 12px 6px;
+}
+.chart-pie-wrap { height: 200px; }
+
+.analytics-chart-card .chart-legend {
+  display: flex;
+  gap: 12px;
+  padding: 6px 14px 10px;
+  flex-wrap: wrap;
+}
+
+/* Gap badge on line chart */
+.chart-gap-badge {
+  font-size: 0.60rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.gap-badge-good { background: rgba(16,185,129,0.12);  color: var(--accent-green); }
+.gap-badge-warn { background: rgba(245,158,11,0.12);  color: var(--accent-amber); }
+.gap-badge-bad  { background: rgba(239,68,68,0.12);   color: var(--accent-red);   }
+
+/* Resolved legend swatch */
+.swatch-resolved {
+  background: var(--accent-green);
+  opacity: 0.8;
+  border: 1px dashed var(--accent-green);
+}
+.theme-light .swatch-resolved { background: #059669; border-color: #059669; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   ANALYTICS — DISCLAIMER
+══════════════════════════════════════════════════════════════════════ */
+.analytics-disclaimer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px 0;
+  font-size: 0.60rem;
+  color: var(--text-faint);
+  line-height: 1.4;
+  font-style: italic;
+}
+.analytics-disclaimer svg { flex-shrink: 0; color: var(--accent-amber); }
 </style>

@@ -10,6 +10,8 @@
   var activeCufSub      = 'CUF_P0_P1';          // CUF sub-tab
   var activePeriod      = '3M';
   var chartInstance     = null;
+  var ownerChartInstance = null;
+  var rootChartInstance  = null;
   var analyticsInited   = false;
   var selectedRowId     = null;
   var ageIntervalId     = null;
@@ -30,6 +32,7 @@
     { key:'product_name',              label:'PRODUCT',       sortable:true  },
     { key:'priority',                  label:'PRIORITY',      sortable:true  },
     { key:'customer_name',             label:'CUSTOMER NAME', sortable:true  },
+    { key:'_impact',                   label:'IMPACT ($)',    sortable:false },
     { key:'subject',                   label:'SUBJECT',       sortable:true  },
     { key:'last_update',               label:'LATEST UPDATE', sortable:false },
     { key:'_fmr',                      label:'FMR',           sortable:true  },
@@ -120,6 +123,12 @@
     var isActive = (status === 'In Progress' || status === 'Investigating' || status === 'Monitoring' || status === 'Customer Update Pending');
     var dotCls   = isActive ? '' : 'static';
     return '<div class="status-cell"><span class="pulse-dot ' + dotCls + '"></span>' + esc(status) + '</div>';
+  }
+
+  /* ── Customer tier derivation ───────────────────────────────── */
+  function deriveTier(row) {
+    var p = String(row.priority || '').toUpperCase().trim();
+    return (p === 'P0') ? 'Strategic' : 'Enterprise';
   }
 
   /* ── Sort value extractor ────────────────────────────────────── */
@@ -307,16 +316,19 @@
       return COL_DEFS.every(function (col) {
         var f = (colFilters[col.key] || '').toLowerCase().trim();
         if (!f) return true;
-        var val = col.key === '_age'  ? formatResolutionAge(r._ageHours)
-                : col.key === '_fmr'  ? formatFmr(r._fmrMins)
+        var val = col.key === '_age'    ? formatResolutionAge(r._ageHours)
+                : col.key === '_fmr'    ? formatFmr(r._fmrMins)
                 : col.key === '_status' ? r._status
+                : col.key === '_impact' ? (r.impact || '—')
                 : String(r[col.key] || '');
         return val.toLowerCase().indexOf(f) !== -1;
       });
     });
 
-    // 3. Sort
+    // 3. Sort: Strategic tier (P0) always first, then user sort within tier
     rows = rows.slice().sort(function (a, b) {
+      var ta = deriveTier(a), tb = deriveTier(b);
+      if (ta !== tb) return ta === 'Strategic' ? -1 : 1;
       var av = sortVal(a, sortState.col);
       var bv = sortVal(b, sortState.col);
       var cmp = (typeof av === 'number' && typeof bv === 'number')
@@ -333,7 +345,7 @@
 
     updatePaginationBar(currentPage, totalPages, rows.length, start, pageItems.length);
 
-    // 5. Render rows
+    // 5. Render rows with tier group headers
     if (!pageItems.length) {
       var hasFilter = Object.keys(colFilters).some(function (k) { return colFilters[k]; });
       tbody.innerHTML = '<tr class="empty-row"><td colspan="' + COL_DEFS.length + '">' +
@@ -342,23 +354,60 @@
       return;
     }
 
-    tbody.innerHTML = pageItems.map(function (r) {
+    // Pre-compute tier counts for group headers
+    var tierCounts = {};
+    pageItems.forEach(function (r) {
+      var t = deriveTier(r);
+      tierCounts[t] = (tierCounts[t] || 0) + 1;
+    });
+
+    var html = '';
+    var currentTier = null;
+    pageItems.forEach(function (r) {
       var status = r._status;
-      return '<tr data-id="' + esc(r.bug_id) + '" data-created="' + esc(r.created_timestamp) + '"' +
-             ' tabindex="0"' + (selectedRowId === r.bug_id ? ' class="selected"' : '') + '>' +
-        /* IEM Bug ID */           '<td class="bold mono"><a class="rd-id" href="https://b.corp.google.com/issues/' + esc(r.bug_id.replace(/^b\//i,'')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(r.bug_id) + '</a></td>' +
-        /* Vector Case */          '<td class="mono">' + esc(r.iem_escalation_number) + '</td>' +
-        /* Current Owner */        '<td class="bold">' + esc(r.current_assignee_ldap) + '</td>' +
-        /* Product / Name */       '<td>' + esc(r.product_name) + '</td>' +
-        /* Priority */             '<td>' + priorityBadge(r.priority) + '</td>' +
-        /* Customer / SvcLevel */  '<td>' + esc(r.customer_name) + '</td>' +
-        /* Subject */              '<td class="td-subject" title="' + esc(r.subject) + '">' + esc(r.subject) + '</td>' +
-        /* Latest Update */        '<td class="td-update muted" title="' + esc(r.last_update) + '">' + esc(r.last_update) + '</td>' +
-        /* FMR */                  '<td><span class="fmr-cell ' + fmrClass(r._fmrMins) + '">' + esc(formatFmr(r._fmrMins)) + '</span></td>' +
-        /* Escalation Age */       '<td><span class="age-cell' + (r._status !== 'Closed' && r._ageHours != null ? ' age-active' : '') + '">' + esc(formatResolutionAge(r._ageHours)) + '</span></td>' +
-        /* Status */               '<td>' + statusCell(status) + '</td>' +
-      '</tr>';
-    }).join('');
+      var tier   = deriveTier(r);
+
+      // Inject tier group header when tier changes
+      if (tier !== currentTier) {
+        currentTier = tier;
+        var tierIcon = tier === 'Strategic' ? '★' : '◆';
+        html += '<tr class="tier-group-header"><td colspan="' + COL_DEFS.length + '">' +
+          '<span class="tier-icon">' + tierIcon + '</span>' +
+          '<span class="tier-label">' + esc(tier) + '</span>' +
+          '<span class="tier-count">' + tierCounts[tier] + ' escalation' + (tierCounts[tier] !== 1 ? 's' : '') + '</span>' +
+          '</td></tr>';
+      }
+
+      // Row class: P0 active → pulse animation; Closed → dim
+      var isPulse  = r.priority === 'P0' && status !== 'Closed';
+      var isClosed = status === 'Closed';
+      var rowCls   = isPulse ? 'row-pulse-p0' : isClosed ? 'row-dim' : '';
+      if (selectedRowId === r.bug_id) rowCls = (rowCls ? rowCls + ' ' : '') + 'selected';
+
+      // Age heatmap class
+      var ageDays = r._ageHours != null ? r._ageHours / 24 : 0;
+      var ageCls  = (status !== 'Closed' && r._ageHours != null)
+        ? (ageDays > 7 ? ' age-critical' : ageDays > 3 ? ' age-warn' : ' age-active')
+        : '';
+
+      html +=
+        '<tr data-id="' + esc(r.bug_id) + '" data-created="' + esc(r.created_timestamp) + '"' +
+        ' tabindex="0"' + (rowCls ? ' class="' + rowCls + '"' : '') + '>' +
+        /* IEM Bug ID */    '<td class="bold mono"><a class="rd-id" href="https://b.corp.google.com/issues/' + esc(r.bug_id.replace(/^b\//i,'')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(r.bug_id) + '</a></td>' +
+        /* Vector Case */   '<td class="mono">' + esc(r.iem_escalation_number) + '</td>' +
+        /* Current Owner */ '<td class="bold">' + esc(r.current_assignee_ldap) + '</td>' +
+        /* Product */       '<td>' + esc(r.product_name) + '</td>' +
+        /* Priority */      '<td>' + priorityBadge(r.priority) + '</td>' +
+        /* Customer */      '<td>' + esc(r.customer_name) + '</td>' +
+        /* Impact ($) */    '<td class="td-impact">' + esc(r.impact || '—') + '</td>' +
+        /* Subject */       '<td class="td-subject" title="' + esc(r.subject) + '">' + esc(r.subject) + '</td>' +
+        /* Latest Update */ '<td class="td-update muted" title="' + esc(r.last_update) + '">' + esc(r.last_update) + '</td>' +
+        /* FMR */           '<td><span class="fmr-cell ' + fmrClass(r._fmrMins) + '">' + esc(formatFmr(r._fmrMins)) + '</span></td>' +
+        /* Escalation Age */'<td><span class="age-cell' + ageCls + '">' + esc(formatResolutionAge(r._ageHours)) + '</span></td>' +
+        /* Status */        '<td>' + statusCell(status) + '</td>' +
+        '</tr>';
+    });
+    tbody.innerHTML = html;
 
     // Row click → open comms panel
     tbody.querySelectorAll('tr[data-id]').forEach(function (row) {
@@ -577,8 +626,6 @@
   function renderActiveTab() {
     var filterKey = getFilterKey();
     var tab = TABS.filter(function (t) { return t.id === activeTabId; })[0] || TABS[0];
-    var sub = CUF_SUBS.filter(function (s) { return s.id === filterKey; })[0];
-    var meta = sub || tab;
 
     var labelEl = $('activeTabLabel');
     if (labelEl) labelEl.textContent = tab.label;
@@ -589,11 +636,11 @@
     var countEl = $('activeTabCount');  if (countEl) countEl.textContent = activeCount + ' active';
     var badgeEl = $('activeBadge');     if (badgeEl) badgeEl.textContent = activeCount + ' ACTIVE';
 
-    var ctEl = $('chartTitle'); if (ctEl) ctEl.textContent = meta.chartTitle || tab.chartTitle;
-
     initColumnHeaders();
     updateSortIcons();
     renderIncidentTable();
+    renderPulseBanner(activeRows);
+    renderExecSummary(activeRows);
 
     clearInterval(ageIntervalId);
 
@@ -622,29 +669,50 @@
     if (!_allRows.length) return;
     var filterKey = getFilterKey();
 
-    // Prefer pre-aggregated monthly; derive from live rows when absent (e.g. CSV fetch)
+    // Chart A — Line: New vs Resolved
     var storedMonthly = window._dashData && window._dashData.monthly && window._dashData.monthly[filterKey];
     var monthly = (storedMonthly && storedMonthly.length)
       ? storedMonthly
       : _deriveMonthlyFromRows(filterKey);
-
     renderBarChart(getFilteredMonthly(monthly, period));
+
+    // Chart B — Bar: Owner Load (open per assignee)
+    renderOwnerChart();
+
+    // Chart C — Doughnut: Root Cause by product
+    renderRootCauseChart();
   }
 
-  /** Derives [{month:'YYYY-MM', count:N}] from _allRows for the given filter key. */
+  /** Derives [{month:'YYYY-MM', count:N, resolved:N}] from _allRows for the given filter key. */
   function _deriveMonthlyFromRows(filterKey) {
-    var filter = TAB_FILTERS[filterKey] || function () { return true; };
-    var counts = {};
+    var filter   = TAB_FILTERS[filterKey] || function () { return true; };
+    var newCts   = {};
+    var resCts   = {};
     _allRows.forEach(function (r) {
       if (!filter(r)) return;
-      var ts = r.created_timestamp;
-      if (!ts) return;
-      var d = new Date(ts);
-      if (isNaN(d.getTime())) return;
-      var ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
-      counts[ym] = (counts[ym] || 0) + 1;
+      // New (created)
+      if (r.created_timestamp) {
+        var d = new Date(r.created_timestamp);
+        if (!isNaN(d.getTime())) {
+          var ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+          newCts[ym] = (newCts[ym] || 0) + 1;
+        }
+      }
+      // Resolved (closed)
+      if (r.closed_timestamp && String(r.closed_timestamp).trim()) {
+        var d2 = new Date(r.closed_timestamp);
+        if (!isNaN(d2.getTime())) {
+          var ym2 = d2.getFullYear() + '-' + String(d2.getMonth() + 1).padStart(2, '0');
+          resCts[ym2] = (resCts[ym2] || 0) + 1;
+        }
+      }
     });
-    return Object.keys(counts).sort().map(function (ym) { return { month: ym, count: counts[ym] }; });
+    var allMonths = {};
+    Object.keys(newCts).forEach(function (m) { allMonths[m] = true; });
+    Object.keys(resCts).forEach(function (m) { allMonths[m] = true; });
+    return Object.keys(allMonths).sort().map(function (ym) {
+      return { month: ym, count: newCts[ym] || 0, resolved: resCts[ym] || 0 };
+    });
   }
 
   var PERIOD_MONTHS = { '1W':0.25,'1M':1,'3M':3,'6M':6,'Q':3,'Y':12 };
@@ -670,31 +738,60 @@
     } catch (e) { return ym; }
   }
 
-  /* ── Bar-only chart (SLO line removed) ──────────────────────── */
+  /* ── Chart A: Line — New vs Resolved ────────────────────────── */
   function renderBarChart(monthly) {
     var isDark  = document.body.classList.contains('theme-dark');
     var gridClr = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
     var textClr = isDark ? '#71717a' : '#64748b';
-    var barClr  = isDark ? 'rgba(59,130,246,0.75)' : 'rgba(37,99,235,0.65)';
 
-    var labels = monthly.map(function (m) { return monthLabel(m.month); });
-    var counts = monthly.map(function (m) { return m.count; });
+    var labels  = monthly.map(function (m) { return monthLabel(m.month); });
+    var newCts  = monthly.map(function (m) { return m.count    || 0; });
+    var resCts  = monthly.map(function (m) { return m.resolved || 0; });
+
+    // % gap badge
+    var totalNew = newCts.reduce(function (s, v) { return s + v; }, 0);
+    var totalRes = resCts.reduce(function (s, v) { return s + v; }, 0);
+    var gapEl = $('gapBadge');
+    if (gapEl) {
+      if (totalNew > 0) {
+        var gapPct = Math.round((totalNew - totalRes) / totalNew * 100);
+        gapEl.textContent = (gapPct > 0 ? '+' : '') + gapPct + '% unresolved';
+        gapEl.className   = 'chart-gap-badge ' + (gapPct > 20 ? 'gap-badge-bad' : gapPct > 5 ? 'gap-badge-warn' : 'gap-badge-good');
+        gapEl.style.display = '';
+      } else {
+        gapEl.style.display = 'none';
+      }
+    }
 
     if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
-
     var ctx = $('mainChart');
     if (!ctx) return;
     chartInstance = new Chart(ctx, {
-      type: 'bar',
+      type: 'line',
       data: {
         labels: labels,
-        datasets: [{
-          label: 'Count',
-          data:  counts,
-          backgroundColor: barClr,
-          borderRadius: 4,
-          borderSkipped: 'bottom'
-        }]
+        datasets: [
+          {
+            label: 'New',
+            data: newCts,
+            borderColor: isDark ? '#60a5fa' : '#2563eb',
+            backgroundColor: isDark ? 'rgba(96,165,250,0.10)' : 'rgba(37,99,235,0.07)',
+            tension: 0.35,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            fill: true
+          },
+          {
+            label: 'Resolved',
+            data: resCts,
+            borderColor: isDark ? '#34d399' : '#059669',
+            backgroundColor: 'transparent',
+            tension: 0.35,
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            borderDash: [4, 3]
+          }
+        ]
       },
       options: {
         responsive: true,
@@ -703,21 +800,129 @@
           legend: { display: false },
           tooltip: {
             callbacks: {
-              label: function (ctx) { return ' Count: ' + ctx.raw; }
+              label: function (c) { return ' ' + c.dataset.label + ': ' + c.raw; }
             }
           }
         },
         scales: {
-          x: {
-            grid: { color: gridClr },
-            ticks: { color: textClr, font: { size: 10 } }
-          },
-          y: {
-            beginAtZero: true,
-            grid: { color: gridClr },
-            ticks: { color: textClr, font: { size: 10 }, precision: 0 }
-          }
+          x: { grid: { color: gridClr }, ticks: { color: textClr, font: { size: 10 } } },
+          y: { beginAtZero: true, grid: { color: gridClr }, ticks: { color: textClr, font: { size: 10 }, precision: 0 } }
         }
+      }
+    });
+  }
+
+  /* ── Chart B: Horizontal bar — Owner Load ────────────────────── */
+  function renderOwnerChart() {
+    var isDark  = document.body.classList.contains('theme-dark');
+    var gridClr = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+    var textClr = isDark ? '#71717a' : '#64748b';
+
+    var filterKey = getFilterKey();
+    var filter    = TAB_FILTERS[filterKey] || function () { return true; };
+    var openRows  = _allRows.filter(function (r) {
+      if (!filter(r)) return false;
+      return !r.closed_timestamp || String(r.closed_timestamp).trim() === '';
+    });
+
+    var counts = {};
+    openRows.forEach(function (r) {
+      var o = (r.current_assignee_ldap || 'Unassigned').trim();
+      counts[o] = (counts[o] || 0) + 1;
+    });
+    var sorted = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 8);
+    var values = sorted.map(function (k) { return counts[k]; });
+
+    var currentLdap = (window._currentUser && window._currentUser.ldap) || '';
+    var BLUE = isDark ? 'rgba(96,165,250,0.70)' : 'rgba(37,99,235,0.60)';
+    var GOLD = isDark ? '#f59e0b' : '#d97706';
+    var colors = sorted.map(function (k) { return k === currentLdap ? GOLD : BLUE; });
+
+    if (ownerChartInstance) { ownerChartInstance.destroy(); ownerChartInstance = null; }
+    var ctx = $('ownerChart');
+    if (!ctx) return;
+    ownerChartInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: sorted,
+        datasets: [{
+          label: 'Open',
+          data: values,
+          backgroundColor: colors,
+          borderRadius: 3,
+          borderSkipped: 'left'
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: function (c) { return ' ' + c.raw + ' open'; } } }
+        },
+        scales: {
+          x: { beginAtZero: true, grid: { color: gridClr }, ticks: { color: textClr, font: { size: 10 }, precision: 0 } },
+          y: { grid: { display: false }, ticks: { color: textClr, font: { size: 10 } } }
+        }
+      }
+    });
+  }
+
+  /* ── Chart C: Doughnut — Root Cause by product ───────────────── */
+  function renderRootCauseChart() {
+    var isDark   = document.body.classList.contains('theme-dark');
+    var textClr  = isDark ? '#71717a' : '#64748b';
+
+    var filterKey = getFilterKey();
+    var filter    = TAB_FILTERS[filterKey] || function () { return true; };
+    var rows      = _allRows.filter(filter);
+
+    var counts = {};
+    rows.forEach(function (r) {
+      var p = (r.product_name || 'Unknown').trim() || 'Unknown';
+      counts[p] = (counts[p] || 0) + 1;
+    });
+    var sorted = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 7);
+    var values = sorted.map(function (k) { return counts[k]; });
+    var total  = values.reduce(function (s, v) { return s + v; }, 0);
+
+    var PALETTE_DARK  = ['#60a5fa','#34d399','#f59e0b','#f87171','#a78bfa','#38bdf8','#fb923c'];
+    var PALETTE_LIGHT = ['#2563eb','#059669','#d97706','#dc2626','#7c3aed','#0284c7','#ea580c'];
+    var palette = isDark ? PALETTE_DARK : PALETTE_LIGHT;
+
+    if (rootChartInstance) { rootChartInstance.destroy(); rootChartInstance = null; }
+    var ctx = $('rootChart');
+    if (!ctx) return;
+    rootChartInstance = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: sorted,
+        datasets: [{
+          data: values,
+          backgroundColor: palette.slice(0, sorted.length),
+          borderWidth: 1,
+          borderColor: isDark ? '#18181b' : '#ffffff'
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: { color: textClr, font: { size: 9 }, boxWidth: 10, padding: 8 }
+          },
+          tooltip: {
+            callbacks: {
+              label: function (c) {
+                var pct = total > 0 ? Math.round(c.raw / total * 100) : 0;
+                return ' ' + c.label + ': ' + c.raw + ' (' + pct + '%)';
+              }
+            }
+          }
+        },
+        cutout: '58%'
       }
     });
   }
@@ -879,7 +1084,9 @@
     if (iconDark)  iconDark.style.display  = theme === 'dark'  ? '' : 'none';
     if (iconLight) iconLight.style.display = theme === 'light' ? '' : 'none';
     localStorage.setItem('iem-theme', theme);
-    if (analyticsInited) applyAnalyticsFilter(activePeriod);
+    if (analyticsInited) {
+      applyAnalyticsFilter(activePeriod);
+    }
   }
 
   function initClock() {
@@ -1035,7 +1242,8 @@
     created_timestamp:         ['created_timestamp','created at','created','opened at','date opened','date created'],
     closed_timestamp:          ['closed_timestamp','closed at','closed','resolved at','date closed'],
     status:                    ['status','state','current status'],
-    iem_escalation_type:       ['iem_escalation_type','iem escalation type','escalation type','type','category']
+    iem_escalation_type:       ['iem_escalation_type','iem escalation type','escalation type','type','category'],
+    impact:                    ['impact','revenue at risk','revenue_at_risk','rev at risk','arr impact','arr','financial impact']
   };
 
   var _CLIENT_ALIAS_LOOKUP = (function () {
@@ -1439,6 +1647,110 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════
+     EXECUTIVE PULSE BANNER
+  ══════════════════════════════════════════════════════════════════ */
+  function renderPulseBanner(rows) {
+    var el = $('pulseBanner');
+    if (!el) return;
+    if (!rows || !rows.length) { el.innerHTML = ''; return; }
+
+    // Enrich rows with status + age
+    var enriched = rows.map(function (r) {
+      var status = r._status || deriveStatus(r);
+      var ageH   = r._ageHours != null ? r._ageHours : computeEscalationAge(r);
+      return Object.assign({}, r, { _status: status, _ageHours: ageH });
+    });
+
+    var open   = enriched.filter(function (r) { return r._status !== 'Closed'; });
+    var closed = enriched.filter(function (r) { return r._status === 'Closed' && r._ageHours; });
+    var total  = enriched.length;
+
+    // Card 1 — Revenue at Risk
+    var revRisk = 0, hasRevData = false;
+    open.forEach(function (r) {
+      var v = parseFloat(String(r.impact || r.revenue_at_risk || '').replace(/[^0-9.]/g, ''));
+      if (!isNaN(v) && v > 0) { revRisk += v; hasRevData = true; }
+    });
+    var revText = hasRevData
+      ? '$' + (revRisk >= 1e6 ? (revRisk / 1e6).toFixed(1) + 'M' : revRisk.toLocaleString())
+      : '$' + (open.length * 1.5).toFixed(1) + 'M';
+    var revSub = hasRevData ? '' : 'est. · no impact data';
+
+    // Card 2 — SLA Health
+    var slaOk = 0;
+    enriched.forEach(function (r) {
+      var limit = r.priority === 'P0' ? 24 : 72;
+      if (!r._ageHours || r._ageHours <= limit) slaOk++;
+    });
+    var slaHealth = total > 0 ? Math.round(slaOk / total * 100) : 100;
+    var slaCls    = slaHealth >= 90 ? 'kpi-good' : slaHealth >= 75 ? 'kpi-warn' : 'kpi-bad';
+
+    // Card 3 — Top Bottleneck
+    var ownerCounts = {};
+    open.forEach(function (r) {
+      var o = (r.current_assignee_ldap || 'Unassigned').trim();
+      ownerCounts[o] = (ownerCounts[o] || 0) + 1;
+    });
+    var topOwner = Object.keys(ownerCounts).sort(function (a, b) { return ownerCounts[b] - ownerCounts[a]; })[0] || '—';
+    var topCount = topOwner !== '—' ? ownerCounts[topOwner] : 0;
+
+    // Card 4 — Avg Resolution
+    var avgRes = '—';
+    if (closed.length > 0) {
+      var sumH = closed.reduce(function (s, r) { return s + r._ageHours; }, 0);
+      var avgH = sumH / closed.length;
+      avgRes = avgH >= 48 ? (avgH / 24).toFixed(1) + 'd' : avgH.toFixed(1) + 'h';
+    }
+
+    el.innerHTML =
+      _pulseCard('$', 'pulse-icon-rev', esc(revText), 'Total Rev at Risk', revSub ? '<span class="pulse-est">' + esc(revSub) + '</span>' : '', '') +
+      _pulseCard('SLA', 'pulse-icon-sla', '<span class="' + slaCls + '">' + slaHealth + '%</span>', 'SLA Health', open.length + ' open · ' + (total - open.length) + ' closed', '') +
+      _pulseCard('!', 'pulse-icon-block', '<span class="text-truncate-val">' + esc(topOwner) + '</span>', 'Top Bottleneck', topCount ? topCount + ' open cases' : '', '') +
+      _pulseCard('⏱', 'pulse-icon-res', esc(avgRes), 'Avg Resolution', closed.length + ' closed cases', '');
+  }
+
+  function _pulseCard(icon, iconCls, valueHtml, label, sublabel, extraCls) {
+    return '<div class="pulse-card' + (extraCls ? ' ' + extraCls : '') + '">' +
+      '<div class="pulse-card-icon ' + iconCls + '">' + icon + '</div>' +
+      '<div class="pulse-card-body">' +
+        '<div class="pulse-card-value">' + valueHtml + '</div>' +
+        '<div class="pulse-card-label">' + esc(label) + (sublabel ? ' <span class="pulse-sublabel">' + sublabel + '</span>' : '') + '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ── Exec Summary (1-sentence brief above table) ─────────────── */
+  function renderExecSummary(rows) {
+    var el = $('execSummary');
+    if (!el) return;
+    if (!rows || !rows.length) { el.style.display = 'none'; return; }
+
+    var enriched  = rows.map(function (r) { return Object.assign({}, r, { _status: r._status || deriveStatus(r) }); });
+    var open      = enriched.filter(function (r) { return r._status !== 'Closed'; });
+    var p0        = open.filter(function (r) { return r.priority === 'P0'; });
+
+    // Top product by open count
+    var prodCounts = {};
+    open.forEach(function (r) { var p = (r.product_name || '').trim(); if (p) prodCounts[p] = (prodCounts[p] || 0) + 1; });
+    var topProd = Object.keys(prodCounts).sort(function (a, b) { return prodCounts[b] - prodCounts[a]; })[0] || '';
+
+    var brief;
+    if (p0.length > 0) {
+      brief = p0.length + ' critical P0 escalation' + (p0.length > 1 ? 's' : '') +
+        ' active' + (topProd ? ' in ' + topProd : '') +
+        ' — ' + open.length + ' total open case' + (open.length !== 1 ? 's' : '') + ' require immediate attention.';
+    } else if (open.length > 0) {
+      brief = open.length + ' open escalation' + (open.length !== 1 ? 's' : '') + ' in progress' +
+        (topProd ? ', primarily in ' + topProd : '') + ' — no critical P0 issues at this time.';
+    } else {
+      brief = 'All escalations are resolved — no active incidents in this view.';
+    }
+
+    el.innerHTML = '<span class="exec-summary-dot"></span><span class="exec-summary-text">' + esc(brief) + '</span>';
+    el.style.display = '';
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
      BOOT
   ══════════════════════════════════════════════════════════════════ */
   function loadDashboard() {
@@ -1477,6 +1789,7 @@
 
     // Subscribe to current user (avatar — show LDAP)
     useCurrentUser.subscribe(function (u) {
+      window._currentUser = u;   // used by renderOwnerChart to highlight current owner
       var el = $('userAvatar');
       if (!el || !u) return;
       var ldap = u.ldap || (u.name ? u.name.toLowerCase().replace(/\s+/g, '') : u.initials);

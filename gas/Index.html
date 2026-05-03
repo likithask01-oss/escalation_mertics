@@ -94,6 +94,12 @@
         <span class="pill" id="activeTabCount"></span>
       </div>
 
+      <!-- ── EXECUTIVE PULSE BANNER ────────────────────────────────── -->
+      <div id="pulseBanner" class="pulse-banner"></div>
+
+      <!-- ── EXEC SUMMARY ──────────────────────────────────────────── -->
+      <div id="execSummary" class="exec-summary" style="display:none"></div>
+
       <!-- ── SECTION 1: LIVE ESCALATIONS TABLE ───────────────────────── -->
       <section class="card" id="liveEscCard">
         <div class="card-header">
@@ -141,20 +147,47 @@
           </div>
         </div>
 
-        <div class="analytics-row">
+        <div class="analytics-charts-grid">
 
-          <div class="analytics-left card" style="width:100%;max-width:100%">
+          <!-- Chart A: New vs Resolved (line) -->
+          <div class="analytics-chart-card card">
             <div class="analytics-panel-hdr">
-              <span class="analytics-panel-title" id="chartTitle">IEM Escalations</span>
+              <span class="analytics-panel-title">New vs Resolved</span>
+              <span class="chart-gap-badge" id="gapBadge" style="display:none"></span>
             </div>
             <div class="chart-container-wrap">
-              <canvas id="mainChart" aria-label="Bar chart: IEM escalation count by month"></canvas>
+              <canvas id="mainChart" aria-label="Line chart: new vs resolved escalations"></canvas>
             </div>
             <div class="chart-legend">
-              <span class="legend-item"><span class="legend-swatch swatch-bar"></span>Count</span>
+              <span class="legend-item"><span class="legend-swatch swatch-bar"></span>New</span>
+              <span class="legend-item"><span class="legend-swatch swatch-resolved"></span>Resolved</span>
             </div>
           </div>
 
+          <!-- Chart B: Owner Load (horizontal bar) -->
+          <div class="analytics-chart-card card">
+            <div class="analytics-panel-hdr">
+              <span class="analytics-panel-title">Owner Load</span>
+            </div>
+            <div class="chart-container-wrap">
+              <canvas id="ownerChart" aria-label="Bar chart: open escalations per owner"></canvas>
+            </div>
+          </div>
+
+          <!-- Chart C: Root Cause (doughnut) -->
+          <div class="analytics-chart-card card">
+            <div class="analytics-panel-hdr">
+              <span class="analytics-panel-title">Root Cause</span>
+            </div>
+            <div class="chart-container-wrap chart-pie-wrap">
+              <canvas id="rootChart" aria-label="Doughnut chart: root cause by product"></canvas>
+            </div>
+          </div>
+
+        </div>
+        <div class="analytics-disclaimer">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Revenue risk figures are derived from available case data only and are for directional assessment. Not for external reporting.
         </div>
       </section>
 

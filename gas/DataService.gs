@@ -269,7 +269,8 @@ var _FETCH_ALIASES_ = {
   created_timestamp:         ['created_timestamp','created at','created','opened at','date opened','date created'],
   closed_timestamp:          ['closed_timestamp','closed at','closed','resolved at','date closed'],
   status:                    ['status','state','current status'],
-  iem_escalation_type:       ['iem_escalation_type','iem escalation type','escalation type','type','category']
+  iem_escalation_type:       ['iem_escalation_type','iem escalation type','escalation type','type','category'],
+  impact:                    ['impact','revenue at risk','revenue_at_risk','rev at risk','arr impact','arr','financial impact']
 };
 
 var _FETCH_ALIAS_LOOKUP_ = (function () {
