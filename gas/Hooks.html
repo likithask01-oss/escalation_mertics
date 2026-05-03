@@ -583,7 +583,7 @@ var useDashboardData = (function () {
 /* ══════════════════════════════════════════════════════════════════════
    Hook: useCurrentUser
    subscribe(fn) → unsubscribeFn
-   fn called with { name, initials }
+   fn called with { name, initials, ldap }
 ══════════════════════════════════════════════════════════════════════ */
 var useCurrentUser = (function () {
   var _subs = [];
@@ -601,23 +601,23 @@ var useCurrentUser = (function () {
   }
 
   function fetch() {
-    // Priority 1: GAS server-side template var (fastest, no round-trip)
+    // Priority 1: GAS getCurrentUser() RPC (returns ldap directly)
+    if (typeof google !== 'undefined' && google.script) {
+      google.script.run
+        .withSuccessHandler(function (u) { _emit(u || { name:'IEM Admin', initials:'IA', ldap:'iem-admin' }); })
+        .withFailureHandler(function ()   { _emit({ name:'IEM Admin', initials:'IA', ldap:'iem-admin' }); })
+        .getCurrentUser();
+      return;
+    }
+
+    // Priority 2: GAS server-side template var (local preview fallback)
     var gasName = (typeof GAS_USER_NAME !== 'undefined' && GAS_USER_NAME &&
                    GAS_USER_NAME.indexOf('<?') === -1)
                 ? GAS_USER_NAME.trim() : '';
     if (gasName) { _emit(_buildUser(gasName)); return; }
 
-    // Priority 2: GAS getCurrentUser() RPC
-    if (typeof google !== 'undefined' && google.script) {
-      google.script.run
-        .withSuccessHandler(function (u) { _emit(u || { name:'IEM Admin', initials:'IA' }); })
-        .withFailureHandler(function ()   { _emit({ name:'IEM Admin', initials:'IA' }); })
-        .getCurrentUser();
-      return;
-    }
-
     // Priority 3: local dev fallback
-    _emit({ name:'IEM Admin', initials:'IA' });
+    _emit({ name:'IEM Admin', initials:'IA', ldap:'iem-admin' });
   }
 
   function _buildUser(name) {
@@ -625,7 +625,8 @@ var useCurrentUser = (function () {
     var initials = parts.length >= 2
       ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
       : name.slice(0, 2).toUpperCase();
-    return { name: name, initials: initials };
+    var ldap = parts.join('').toLowerCase();
+    return { name: name, initials: initials, ldap: ldap };
   }
 
   return { subscribe: subscribe, fetch: fetch };

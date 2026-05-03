@@ -39,16 +39,16 @@
 
   /* ── Tab registry ────────────────────────────────────────────────── */
   var TABS = [
-    { id:'EXEC_ESCALATIONS', label:'EXEC ESCALATIONS', kpi:'KR2', chartTitle:'IEM Escalations — Exec',        rawTitle:'Exec Escalations RawData' },
-    { id:'MCS',              label:'MCS',              kpi:'KR4', chartTitle:'IEM Escalations — MCS',         rawTitle:'MCS RawData' },
-    { id:'CUF_ESCALATIONS',  label:'CUF ESCALATIONS',  kpi:'KR3', chartTitle:'IEM Escalations — CUF',         rawTitle:'CUF Escalations RawData' },
-    { id:'SOCIAL_CARE',      label:'SOCIAL CARE',      kpi:'KR7', chartTitle:'IEM Escalations — Social Care', rawTitle:'Social Care RawData' }
+    { id:'EXEC_ESCALATIONS', label:'EXEC ESCALATIONS', chartTitle:'IEM Escalations — Exec' },
+    { id:'MCS',              label:'MCS',              chartTitle:'IEM Escalations — MCS' },
+    { id:'CUF_ESCALATIONS',  label:'CUF ESCALATIONS',  chartTitle:'IEM Escalations — CUF' },
+    { id:'SOCIAL_CARE',      label:'SOCIAL CARE',      chartTitle:'IEM Escalations — Social Care' }
   ];
 
   var CUF_SUBS = [
-    { id:'CUF_P0_P1',   kpi:'KR3', chartTitle:'IEM Escalations — CUF P0/P1',   rawTitle:'CUF P0/P1 RawData' },
-    { id:'CUF_GUP',     kpi:'KR5', chartTitle:'IEM Escalations — CUF gUP',     rawTitle:'CUF gUP RawData' },
-    { id:'CUF_BILLING', kpi:'KR6', chartTitle:'IEM Escalations — CUF Billing', rawTitle:'CUF Billing RawData' }
+    { id:'CUF_P0_P1',   chartTitle:'IEM Escalations — CUF P0/P1' },
+    { id:'CUF_GUP',     chartTitle:'IEM Escalations — CUF gUP' },
+    { id:'CUF_BILLING', chartTitle:'IEM Escalations — CUF Billing' }
   ];
 
   /* ── Returns the filter key for the currently active view ─────── */
@@ -346,7 +346,7 @@
       var status = r._status;
       return '<tr data-id="' + esc(r.bug_id) + '" data-created="' + esc(r.created_timestamp) + '"' +
              ' tabindex="0"' + (selectedRowId === r.bug_id ? ' class="selected"' : '') + '>' +
-        /* IEM Bug ID */           '<td class="bold mono"><a class="rd-id" href="https://b/' + esc(r.bug_id.replace('b/','')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(r.bug_id) + '</a></td>' +
+        /* IEM Bug ID */           '<td class="bold mono"><a class="rd-id" href="https://b.corp.google.com/issues/' + esc(r.bug_id.replace(/^b\//i,'')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(r.bug_id) + '</a></td>' +
         /* Vector Case */          '<td class="mono">' + esc(r.iem_escalation_number) + '</td>' +
         /* Current Owner */        '<td class="bold">' + esc(r.current_assignee_ldap) + '</td>' +
         /* Product / Name */       '<td>' + esc(r.product_name) + '</td>' +
@@ -589,9 +589,7 @@
     var countEl = $('activeTabCount');  if (countEl) countEl.textContent = activeCount + ' active';
     var badgeEl = $('activeBadge');     if (badgeEl) badgeEl.textContent = activeCount + ' ACTIVE';
 
-    var kpiEl = $('kpiTag');       if (kpiEl) kpiEl.textContent = meta.kpi || tab.kpi;
-    var ctEl  = $('chartTitle');   if (ctEl)  ctEl.textContent  = meta.chartTitle;
-    var rdEl  = $('rawDataTitle'); if (rdEl)  rdEl.textContent  = meta.rawTitle;
+    var ctEl = $('chartTitle'); if (ctEl) ctEl.textContent = meta.chartTitle || tab.chartTitle;
 
     initColumnHeaders();
     updateSortIcons();
@@ -630,10 +628,7 @@
       ? storedMonthly
       : _deriveMonthlyFromRows(filterKey);
 
-    var raw = (window._dashData && window._dashData.raw && window._dashData.raw[filterKey]) || [];
-
     renderBarChart(getFilteredMonthly(monthly, period));
-    renderRawTable(getFilteredRaw(raw, period));
   }
 
   /** Derives [{month:'YYYY-MM', count:N}] from _allRows for the given filter key. */
@@ -727,28 +722,6 @@
     });
   }
 
-  /* ── Raw data table ──────────────────────────────────────────── */
-  function renderRawTable(raw) {
-    var tbody = $('rawDataTbody');
-    var count = $('rawDataCount');
-    if (!tbody) return;
-    if (count) count.textContent = raw.length + ' records';
-    if (!raw.length) {
-      tbody.innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-faint);font-style:italic;font-size:0.72rem">No records in selected period.</td></tr>';
-      return;
-    }
-    tbody.innerHTML = raw.map(function (r) {
-      return '<tr>' +
-        '<td class="rd-month">' + esc(r.month)      + '</td>' +
-        '<td class="rd-id">'   + esc(r.bugId)       + '</td>' +
-        '<td class="rd-esc">'  + esc(r.escalation)  + '</td>' +
-        '<td class="rd-subject" title="' + esc(r.subject) + '">' + esc(r.subject) + '</td>' +
-        '<td class="rd-ts">'   + esc(r.created)     + '</td>' +
-        '<td class="rd-ts">'   + esc(r.firstAssign) + '</td>' +
-        '<td class="rd-ts">'   + esc(r.firstUpdate) + '</td>' +
-      '</tr>';
-    }).join('');
-  }
 
   /* ══════════════════════════════════════════════════════════════════
      LOGO + USER AVATAR
@@ -940,12 +913,6 @@
     if ($('errorMsg'))        $('errorMsg').textContent           = msg || 'Failed to load data.';
   }
 
-  function updateFooter(h) {
-    var left  = $('footer-left');
-    var right = $('footer-right');
-    if (left  && h.version)         left.textContent  = (h.version || 'v4.2.1-RELEASE') + ' | AUTHENTICATED: ' + (h.authenticatedAs || 'MIM-ADMIN-01');
-    if (right && h.apiLatency)      right.textContent = 'API: ' + h.apiLatency + ' | UPTIME: ' + h.uptime + ' | LOG: ' + h.logRate;
-  }
 
   /* ══════════════════════════════════════════════════════════════════
      SHEET URL FETCH BAR
@@ -1500,7 +1467,6 @@
         if (id && !/^b\//i.test(id)) id = 'b/' + id;
         return id !== r.bug_id ? Object.assign({}, r, { bug_id: id }) : r;
       });
-      updateFooter({});
       showDashboard();
       renderActiveTab();
       initAnalytics();
@@ -1509,13 +1475,14 @@
       showError(err && err.message ? err.message : 'Failed to load dashboard data.');
     });
 
-    // Subscribe to current user (avatar)
+    // Subscribe to current user (avatar — show LDAP)
     useCurrentUser.subscribe(function (u) {
       var el = $('userAvatar');
       if (!el || !u) return;
-      el.textContent = u.initials;
-      el.title       = 'Logged in as ' + u.name;
-      el.setAttribute('aria-label', 'User: ' + u.name);
+      var ldap = u.ldap || (u.name ? u.name.toLowerCase().replace(/\s+/g, '') : u.initials);
+      el.textContent = ldap;
+      el.title       = 'Logged in as ' + (u.ldap || u.name);
+      el.setAttribute('aria-label', 'User: ' + (u.ldap || u.name));
     });
 
     useCurrentUser.fetch();
