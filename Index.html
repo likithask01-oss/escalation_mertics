@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IEM Escalations Dashboard</title>
+  <title>IEM Ops Dashboard</title>
   <?!= include('Styles') ?>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   <!-- GAS template vars — evaluated server-side; literal strings in local browser preview -->
@@ -20,7 +20,7 @@
       </div>
       <div class="title-block">
         <span class="team-label">IEM TEAM</span>
-        <span class="dashboard-title">IEM Escalations Dashboard</span>
+        <span class="dashboard-title">IEM Ops Dashboard</span>
       </div>
     </div>
     <div class="topnav-right">
@@ -67,16 +67,6 @@
     <button class="subtab active" role="tab" aria-selected="true"  data-cuf="CUF_P0_P1"   >P0 / P1</button>
     <button class="subtab"        role="tab" aria-selected="false" data-cuf="CUF_GUP"     >gUP</button>
     <button class="subtab"        role="tab" aria-selected="false" data-cuf="CUF_BILLING" >Billing</button>
-  </div>
-
-  <!-- ── SHEET URL FETCH BAR ───────────────────────────────────────────── -->
-  <div class="sheet-fetch-bar" id="sheetFetchBar" role="search" aria-label="Fetch from Google Sheet">
-    <label class="sfb-label" for="sheetUrlInput">Google Sheet URL</label>
-    <input  class="sfb-input" id="sheetUrlInput" type="text"
-            placeholder="https://docs.google.com/spreadsheets/d/…"
-            autocomplete="off" spellcheck="false" aria-label="Google Sheet URL" />
-    <button class="sfb-btn" id="sheetFetchBtn" type="button">Fetch</button>
-    <span   class="sfb-status" id="sfbStatus" aria-live="polite"></span>
   </div>
 
   <!-- ── MAIN ──────────────────────────────────────────────────────────── -->
@@ -153,9 +143,8 @@
 
         <div class="analytics-row">
 
-          <div class="analytics-left card">
+          <div class="analytics-left card" style="width:100%;max-width:100%">
             <div class="analytics-panel-hdr">
-              <span class="kpi-tag" id="kpiTag">KR2</span>
               <span class="analytics-panel-title" id="chartTitle">IEM Escalations</span>
             </div>
             <div class="chart-container-wrap">
@@ -166,40 +155,11 @@
             </div>
           </div>
 
-          <div class="analytics-right card">
-            <div class="analytics-panel-hdr">
-              <span class="analytics-panel-title" id="rawDataTitle">RawData</span>
-              <span class="rawdata-count" id="rawDataCount"></span>
-            </div>
-            <div class="rawdata-wrap">
-              <table class="rawdata-table" aria-label="Historical raw data">
-                <thead>
-                  <tr>
-                    <th>Month</th>
-                    <th>Bug ID</th>
-                    <th>Escalation #</th>
-                    <th>Subject</th>
-                    <th>Created</th>
-                    <th>First Assign</th>
-                    <th>First Update</th>
-                  </tr>
-                </thead>
-                <tbody id="rawDataTbody"></tbody>
-              </table>
-            </div>
-          </div>
-
         </div>
       </section>
 
     </div><!-- /dashboardContent -->
   </main>
-
-  <!-- ── FOOTER ────────────────────────────────────────────────────────── -->
-  <footer class="footer" role="contentinfo">
-    <div class="footer-left" id="footer-left">v4.2.1-RELEASE | AUTHENTICATED: MIM-ADMIN-01</div>
-    <div class="footer-right" id="footer-right">API: 12MS | UPTIME: 99.98% | LOG: 12.4K/S</div>
-  </footer>
 
   <!-- ── COMMS LOG MODAL ────────────────────────────────────────────────── -->
   <div class="modal-backdrop" id="logModalBackdrop" aria-hidden="true" style="display:none"

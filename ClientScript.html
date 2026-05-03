@@ -24,31 +24,31 @@
 
   /* ── Column definitions ─────────────────────────────────────────── */
   var COL_DEFS = [
-    { key:'bug_id',                    label:'IEM Bug ID',               sortable:true  },
-    { key:'iem_escalation_number',     label:'Vector Case',              sortable:true  },
-    { key:'current_assignee_ldap',     label:'Current Owner',            sortable:true  },
-    { key:'product_name',              label:'Product / Name',           sortable:true  },
-    { key:'priority',                  label:'Priority',                 sortable:true  },
-    { key:'customer_name',             label:'Customer / Service Level', sortable:true  },
-    { key:'subject',                   label:'Subject',                  sortable:true  },
-    { key:'last_update',               label:'Latest Update',            sortable:false },
-    { key:'time_to_first_update_mins', label:'FMR',                      sortable:true  },
-    { key:'resolution_hours',          label:'Escalation Age',           sortable:true  },
-    { key:'_status',                   label:'Status',                   sortable:true  }
+    { key:'bug_id',                    label:'IEM BUG ID',    sortable:true  },
+    { key:'iem_escalation_number',     label:'VECTOR CASE',   sortable:true  },
+    { key:'current_assignee_ldap',     label:'CURRENT OWNER', sortable:true  },
+    { key:'product_name',              label:'PRODUCT',       sortable:true  },
+    { key:'priority',                  label:'PRIORITY',      sortable:true  },
+    { key:'customer_name',             label:'CUSTOMER NAME', sortable:true  },
+    { key:'subject',                   label:'SUBJECT',       sortable:true  },
+    { key:'last_update',               label:'LATEST UPDATE', sortable:false },
+    { key:'_fmr',                      label:'FMR',           sortable:true  },
+    { key:'_age',                      label:'ESCALATION AGE',sortable:true  },
+    { key:'_status',                   label:'STATUS',        sortable:true  }
   ];
 
   /* ── Tab registry ────────────────────────────────────────────────── */
   var TABS = [
-    { id:'EXEC_ESCALATIONS', label:'EXEC ESCALATIONS', kpi:'KR2', chartTitle:'IEM Escalations — Exec',        rawTitle:'Exec Escalations RawData' },
-    { id:'MCS',              label:'MCS',              kpi:'KR4', chartTitle:'IEM Escalations — MCS',         rawTitle:'MCS RawData' },
-    { id:'CUF_ESCALATIONS',  label:'CUF ESCALATIONS',  kpi:'KR3', chartTitle:'IEM Escalations — CUF',         rawTitle:'CUF Escalations RawData' },
-    { id:'SOCIAL_CARE',      label:'SOCIAL CARE',      kpi:'KR7', chartTitle:'IEM Escalations — Social Care', rawTitle:'Social Care RawData' }
+    { id:'EXEC_ESCALATIONS', label:'EXEC ESCALATIONS', chartTitle:'IEM Escalations — Exec' },
+    { id:'MCS',              label:'MCS',              chartTitle:'IEM Escalations — MCS' },
+    { id:'CUF_ESCALATIONS',  label:'CUF ESCALATIONS',  chartTitle:'IEM Escalations — CUF' },
+    { id:'SOCIAL_CARE',      label:'SOCIAL CARE',      chartTitle:'IEM Escalations — Social Care' }
   ];
 
   var CUF_SUBS = [
-    { id:'CUF_P0_P1',   kpi:'KR3', chartTitle:'IEM Escalations — CUF P0/P1',   rawTitle:'CUF P0/P1 RawData' },
-    { id:'CUF_GUP',     kpi:'KR5', chartTitle:'IEM Escalations — CUF gUP',     rawTitle:'CUF gUP RawData' },
-    { id:'CUF_BILLING', kpi:'KR6', chartTitle:'IEM Escalations — CUF Billing', rawTitle:'CUF Billing RawData' }
+    { id:'CUF_P0_P1',   chartTitle:'IEM Escalations — CUF P0/P1' },
+    { id:'CUF_GUP',     chartTitle:'IEM Escalations — CUF gUP' },
+    { id:'CUF_BILLING', chartTitle:'IEM Escalations — CUF Billing' }
   ];
 
   /* ── Returns the filter key for the currently active view ─────── */
@@ -124,10 +124,10 @@
 
   /* ── Sort value extractor ────────────────────────────────────── */
   function sortVal(row, col) {
-    if (col === '_status')              return deriveStatus(row);
-    if (col === 'resolution_hours')     return Number(row.resolution_hours) || 0;
-    if (col === 'time_to_first_update_mins') return Number(row.time_to_first_update_mins) || 0;
-    if (col === 'created_timestamp')    return new Date(row.created_timestamp).getTime() || 0;
+    if (col === '_status') return row._status || deriveStatus(row);
+    if (col === '_age')    return row._ageHours != null ? row._ageHours : -1;
+    if (col === '_fmr')    return Number(row._fmrMins) || 0;
+    if (col === 'created_timestamp') return new Date(row.created_timestamp).getTime() || 0;
     return String(row[col] || '').toLowerCase();
   }
 
@@ -288,9 +288,18 @@
 
     var rows = getActiveRows();
 
-    // 1. Add derived _status field
+    // 1. Compute derived fields: _status, _ageHours, _fmrMins
     rows = rows.map(function (r) {
-      return Object.assign({}, r, { _status: deriveStatus(r) });
+      var ageHours = computeEscalationAge(r);
+      // FMR: prefer p0_time_to_first_update_mins, fall back to time_to_first_update_mins
+      var fmrMins  = r.p0_time_to_first_update_mins != null && r.p0_time_to_first_update_mins !== ''
+        ? Number(r.p0_time_to_first_update_mins)
+        : Number(r.time_to_first_update_mins) || null;
+      return Object.assign({}, r, {
+        _status:   deriveStatus(r),
+        _ageHours: ageHours,
+        _fmrMins:  fmrMins
+      });
     });
 
     // 2. Apply column filters
@@ -298,11 +307,10 @@
       return COL_DEFS.every(function (col) {
         var f = (colFilters[col.key] || '').toLowerCase().trim();
         if (!f) return true;
-        var val = col.key === 'resolution_hours'
-          ? formatResolutionAge(r.resolution_hours)
-          : col.key === 'time_to_first_update_mins'
-          ? formatFmr(r.time_to_first_update_mins)
-          : String(r[col.key] || '');
+        var val = col.key === '_age'  ? formatResolutionAge(r._ageHours)
+                : col.key === '_fmr'  ? formatFmr(r._fmrMins)
+                : col.key === '_status' ? r._status
+                : String(r[col.key] || '');
         return val.toLowerCase().indexOf(f) !== -1;
       });
     });
@@ -338,7 +346,7 @@
       var status = r._status;
       return '<tr data-id="' + esc(r.bug_id) + '" data-created="' + esc(r.created_timestamp) + '"' +
              ' tabindex="0"' + (selectedRowId === r.bug_id ? ' class="selected"' : '') + '>' +
-        /* IEM Bug ID */           '<td class="bold mono"><a class="rd-id" href="https://b/' + esc(r.bug_id.replace('b/','')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(r.bug_id) + '</a></td>' +
+        /* IEM Bug ID */           '<td class="bold mono"><a class="rd-id" href="https://b.corp.google.com/issues/' + esc(r.bug_id.replace(/^b\//i,'')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(r.bug_id) + '</a></td>' +
         /* Vector Case */          '<td class="mono">' + esc(r.iem_escalation_number) + '</td>' +
         /* Current Owner */        '<td class="bold">' + esc(r.current_assignee_ldap) + '</td>' +
         /* Product / Name */       '<td>' + esc(r.product_name) + '</td>' +
@@ -346,8 +354,8 @@
         /* Customer / SvcLevel */  '<td>' + esc(r.customer_name) + '</td>' +
         /* Subject */              '<td class="td-subject" title="' + esc(r.subject) + '">' + esc(r.subject) + '</td>' +
         /* Latest Update */        '<td class="td-update muted" title="' + esc(r.last_update) + '">' + esc(r.last_update) + '</td>' +
-        /* FMR */                  '<td><span class="fmr-cell ' + fmrClass(r.time_to_first_update_mins) + '">' + esc(formatFmr(r.time_to_first_update_mins)) + '</span></td>' +
-        /* Escalation Age */       '<td><span class="age-cell">' + esc(formatResolutionAge(r.resolution_hours)) + '</span></td>' +
+        /* FMR */                  '<td><span class="fmr-cell ' + fmrClass(r._fmrMins) + '">' + esc(formatFmr(r._fmrMins)) + '</span></td>' +
+        /* Escalation Age */       '<td><span class="age-cell' + (r._status !== 'Closed' && r._ageHours != null ? ' age-active' : '') + '">' + esc(formatResolutionAge(r._ageHours)) + '</span></td>' +
         /* Status */               '<td>' + statusCell(status) + '</td>' +
       '</tr>';
     }).join('');
@@ -451,7 +459,10 @@
         '<td>' + esc(l.author) + '</td>' +
       '</tr>';
     }).join('');
-    var msgText = latest ? latest.message : 'No communications logged yet.';
+    // Prefer last comms-log message; fall back to row's last_update field
+    var msgText = latest ? latest.message
+                : (row.last_update && row.last_update.trim()) ? row.last_update.trim()
+                : 'No communications logged yet.';
     var safeMsgAttr = msgText.replace(/"/g,'&quot;');
 
     panel.innerHTML =
@@ -578,9 +589,7 @@
     var countEl = $('activeTabCount');  if (countEl) countEl.textContent = activeCount + ' active';
     var badgeEl = $('activeBadge');     if (badgeEl) badgeEl.textContent = activeCount + ' ACTIVE';
 
-    var kpiEl = $('kpiTag');       if (kpiEl) kpiEl.textContent = meta.kpi || tab.kpi;
-    var ctEl  = $('chartTitle');   if (ctEl)  ctEl.textContent  = meta.chartTitle;
-    var rdEl  = $('rawDataTitle'); if (rdEl)  rdEl.textContent  = meta.rawTitle;
+    var ctEl = $('chartTitle'); if (ctEl) ctEl.textContent = meta.chartTitle || tab.chartTitle;
 
     initColumnHeaders();
     updateSortIcons();
@@ -613,15 +622,29 @@
     if (!_allRows.length) return;
     var filterKey = getFilterKey();
 
-    // Fetch monthly and raw from data hook's last known data
-    var monthly = (window._dashData && window._dashData.monthly && window._dashData.monthly[filterKey]) || [];
-    var raw     = (window._dashData && window._dashData.raw     && window._dashData.raw[filterKey])     || [];
+    // Prefer pre-aggregated monthly; derive from live rows when absent (e.g. CSV fetch)
+    var storedMonthly = window._dashData && window._dashData.monthly && window._dashData.monthly[filterKey];
+    var monthly = (storedMonthly && storedMonthly.length)
+      ? storedMonthly
+      : _deriveMonthlyFromRows(filterKey);
 
-    var fMonthly = getFilteredMonthly(monthly, period);
-    var fRaw     = getFilteredRaw(raw, period);
+    renderBarChart(getFilteredMonthly(monthly, period));
+  }
 
-    renderBarChart(fMonthly);
-    renderRawTable(fRaw);
+  /** Derives [{month:'YYYY-MM', count:N}] from _allRows for the given filter key. */
+  function _deriveMonthlyFromRows(filterKey) {
+    var filter = TAB_FILTERS[filterKey] || function () { return true; };
+    var counts = {};
+    _allRows.forEach(function (r) {
+      if (!filter(r)) return;
+      var ts = r.created_timestamp;
+      if (!ts) return;
+      var d = new Date(ts);
+      if (isNaN(d.getTime())) return;
+      var ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      counts[ym] = (counts[ym] || 0) + 1;
+    });
+    return Object.keys(counts).sort().map(function (ym) { return { month: ym, count: counts[ym] }; });
   }
 
   var PERIOD_MONTHS = { '1W':0.25,'1M':1,'3M':3,'6M':6,'Q':3,'Y':12 };
@@ -699,28 +722,6 @@
     });
   }
 
-  /* ── Raw data table ──────────────────────────────────────────── */
-  function renderRawTable(raw) {
-    var tbody = $('rawDataTbody');
-    var count = $('rawDataCount');
-    if (!tbody) return;
-    if (count) count.textContent = raw.length + ' records';
-    if (!raw.length) {
-      tbody.innerHTML = '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-faint);font-style:italic;font-size:0.72rem">No records in selected period.</td></tr>';
-      return;
-    }
-    tbody.innerHTML = raw.map(function (r) {
-      return '<tr>' +
-        '<td class="rd-month">' + esc(r.month)      + '</td>' +
-        '<td class="rd-id">'   + esc(r.bugId)       + '</td>' +
-        '<td class="rd-esc">'  + esc(r.escalation)  + '</td>' +
-        '<td class="rd-subject" title="' + esc(r.subject) + '">' + esc(r.subject) + '</td>' +
-        '<td class="rd-ts">'   + esc(r.created)     + '</td>' +
-        '<td class="rd-ts">'   + esc(r.firstAssign) + '</td>' +
-        '<td class="rd-ts">'   + esc(r.firstUpdate) + '</td>' +
-      '</tr>';
-    }).join('');
-  }
 
   /* ══════════════════════════════════════════════════════════════════
      LOGO + USER AVATAR
@@ -912,12 +913,6 @@
     if ($('errorMsg'))        $('errorMsg').textContent           = msg || 'Failed to load data.';
   }
 
-  function updateFooter(h) {
-    var left  = $('footer-left');
-    var right = $('footer-right');
-    if (left  && h.version)         left.textContent  = (h.version || 'v4.2.1-RELEASE') + ' | AUTHENTICATED: ' + (h.authenticatedAs || 'MIM-ADMIN-01');
-    if (right && h.apiLatency)      right.textContent = 'API: ' + h.apiLatency + ' | UPTIME: ' + h.uptime + ' | LOG: ' + h.logRate;
-  }
 
   /* ══════════════════════════════════════════════════════════════════
      SHEET URL FETCH BAR
@@ -1005,10 +1000,21 @@
       _sfbStatus('No rows returned.', false);
       return;
     }
+    // Normalise bug_id: ensure "b/" prefix
+    rows = rows.map(function (r) {
+      var id = String(r.bug_id || '').trim();
+      if (id && !/^b\//i.test(id)) id = 'b/' + id;
+      return id !== r.bug_id ? Object.assign({}, r, { bug_id: id }) : r;
+    });
     _allRows = rows;
-    if (window._dashData) window._dashData.rows = rows;
+    if (window._dashData) {
+      window._dashData.rows    = rows;
+      window._dashData.monthly = {};   // clear stale pre-aggregated data; will derive from rows
+      window._dashData.raw     = {};
+    }
     showDashboard();
     renderActiveTab();
+    if (analyticsInited) applyAnalyticsFilter(activePeriod);
     _sfbStatus(rows.length + ' rows loaded' + (meta && meta.sheetName ? ' from "' + meta.sheetName + '"' : '') + '.', true);
   }
 
@@ -1023,6 +1029,7 @@
     customer_name:             ['customer_name','customer name','customer','account','company'],
     subject:                   ['subject','title','issue','summary','description'],
     last_update:               ['last_update','last update','update','latest update','notes'],
+    p0_time_to_first_update_mins: ['p0_time_to_first_update_mins','p0 time to first update (mins)','p0 fmr (mins)','p0 fmr'],
     time_to_first_update_mins: ['time_to_first_update_mins','time to first update (mins)','fmr (mins)','fmr','first response mins','tfu'],
     resolution_hours:          ['resolution_hours','resolution hours','age (hours)','resolution time','hours to close'],
     created_timestamp:         ['created_timestamp','created at','created','opened at','date opened','date created'],
@@ -1455,8 +1462,11 @@
     // Subscribe to dashboard data
     useDashboardData.subscribe('change', function (data) {
       window._dashData = data;
-      _allRows = data.rows || [];
-      updateFooter({});
+      _allRows = (data.rows || []).map(function (r) {
+        var id = String(r.bug_id || '').trim();
+        if (id && !/^b\//i.test(id)) id = 'b/' + id;
+        return id !== r.bug_id ? Object.assign({}, r, { bug_id: id }) : r;
+      });
       showDashboard();
       renderActiveTab();
       initAnalytics();
@@ -1465,13 +1475,14 @@
       showError(err && err.message ? err.message : 'Failed to load dashboard data.');
     });
 
-    // Subscribe to current user (avatar)
+    // Subscribe to current user (avatar — show LDAP)
     useCurrentUser.subscribe(function (u) {
       var el = $('userAvatar');
       if (!el || !u) return;
-      el.textContent = u.initials;
-      el.title       = 'Logged in as ' + u.name;
-      el.setAttribute('aria-label', 'User: ' + u.name);
+      var ldap = u.ldap || (u.name ? u.name.toLowerCase().replace(/\s+/g, '') : u.initials);
+      el.textContent = ldap;
+      el.title       = 'Logged in as ' + (u.ldap || u.name);
+      el.setAttribute('aria-label', 'User: ' + (u.ldap || u.name));
     });
 
     useCurrentUser.fetch();

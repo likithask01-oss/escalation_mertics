@@ -7,17 +7,18 @@ function getDashboardData() {
 
   if (source === 'publicSheet') {
     try {
-      var result = SheetFetchService.fetchAll();
+      var sheetId = PropertiesService.getScriptProperties().getProperty('SHEET_ID') || INCIDENT_CONFIG.SPREADSHEET_ID || '';
+      var gid     = PropertiesService.getScriptProperties().getProperty('SHEET_GID') || INCIDENT_CONFIG.INCIDENTS_GID  || '';
+      var result  = fetchSheetByUrl(sheetId, gid);
+      if (!result.ok) throw new Error(result.error || 'fetchSheetByUrl failed');
       return {
         rows:         result.rows,
-        monthly:      result.monthly,
-        raw:          result.raw,
+        monthly:      {},
+        raw:          {},
         systemHealth: getSystemHealth_(),
         _meta:        result._meta || {}
       };
     } catch (e) {
-      // Surface the error message to the frontend so the settings panel can
-      // display it instead of silently falling back to mock data.
       return {
         rows: [], monthly: {}, raw: {},
         systemHealth: getSystemHealth_(),
@@ -38,31 +39,27 @@ function getDashboardData() {
 function getCommunicationLog(incidentId) {
   var source = _runtimeDataSource_();
   if (source === 'publicSheet') {
-    try {
-      return SheetFetchService.fetchCommsLog(incidentId);
-    } catch (e) {
-      return [];
-    }
+    return [];   // comms log not available from plain CSV sheet
   }
   return getIncidentProvider_(source).getCommunicationLog(incidentId);
 }
 
-// Returns the active user's display name and initials for the UI avatar.
+// Returns the active user's display name, LDAP and initials for the UI avatar.
 function getCurrentUser() {
   try {
     var email = Session.getActiveUser().getEmail();
-    if (!email) return { name: 'IEM Admin', initials: 'IA' };
-    var local  = email.split('@')[0];
-    var parts  = local.replace(/[._-]/g, ' ').split(' ').filter(Boolean);
+    if (!email) return { name: 'IEM Admin', initials: 'IA', ldap: 'iem-admin' };
+    var ldap   = email.split('@')[0];
+    var parts  = ldap.replace(/[._-]/g, ' ').split(' ').filter(Boolean);
     var name   = parts.map(function (p) {
       return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
     }).join(' ');
     var initials = parts.length >= 2
       ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
       : name.slice(0, 2).toUpperCase();
-    return { name: name, initials: initials };
+    return { name: name, initials: initials, ldap: ldap };
   } catch (e) {
-    return { name: 'IEM Admin', initials: 'IA' };
+    return { name: 'IEM Admin', initials: 'IA', ldap: 'iem-admin' };
   }
 }
 
@@ -127,19 +124,8 @@ function testSheetConnection(config) {
     var id = _extractSheetId_(config.sheetUrl || '') || config.sheetId || '';
     if (!id) throw new Error('No Sheet ID found. Enter a Google Sheets URL or Sheet ID.');
 
-    // Temporarily override SheetFetchService config for this call only.
-    var savedId  = INCIDENT_CONFIG.SPREADSHEET_ID;
-    var savedGid = INCIDENT_CONFIG.INCIDENTS_GID;
-    INCIDENT_CONFIG.SPREADSHEET_ID = id;
-    INCIDENT_CONFIG.INCIDENTS_GID  = String(config.sheetGid || '');
-
-    var result;
-    try {
-      result = SheetFetchService.fetchAll();
-    } finally {
-      INCIDENT_CONFIG.SPREADSHEET_ID = savedId;
-      INCIDENT_CONFIG.INCIDENTS_GID  = savedGid;
-    }
+    var result = fetchSheetByUrl(id, config.sheetGid || '');
+    if (!result.ok) throw new Error(result.error || 'Fetch failed');
 
     return {
       success:     true,
@@ -212,8 +198,9 @@ function _extractSheetId_(urlOrId) {
 
 /**
  * Called by the inline "Google Sheet URL → Fetch" bar on the frontend.
- * Temporarily applies sheetId/gid, runs SheetFetchService, and returns
- * canonical rows so the client can feed them straight into the table.
+ * Self-contained: does NOT depend on SheetFetchService.
+ * Strategy 1 — SpreadsheetApp (requires sheet shared with script user).
+ * Strategy 2 — UrlFetchApp CSV export (requires sheet publicly shared).
  *
  * @param {string} sheetId
  * @param {string} gid   numeric GID string, or '' for first sheet
@@ -222,19 +209,132 @@ function _extractSheetId_(urlOrId) {
 function fetchSheetByUrl(sheetId, gid) {
   try {
     if (!sheetId) throw new Error('No Sheet ID provided.');
-    var saved = { id: INCIDENT_CONFIG.SPREADSHEET_ID, gid: INCIDENT_CONFIG.INCIDENTS_GID };
-    INCIDENT_CONFIG.SPREADSHEET_ID = sheetId;
-    INCIDENT_CONFIG.INCIDENTS_GID  = String(gid || '');
-    var result;
-    try { result = SheetFetchService.fetchAll(); }
-    finally {
-      INCIDENT_CONFIG.SPREADSHEET_ID = saved.id;
-      INCIDENT_CONFIG.INCIDENTS_GID  = saved.gid;
+
+    var rawObjects, sheetName, strategy;
+    var targetGid = gid ? String(gid) : '';
+
+    // ── Strategy 1: SpreadsheetApp ──────────────────────────────────────
+    try {
+      var ss     = SpreadsheetApp.openById(sheetId);
+      var sheets = ss.getSheets();
+      var sheet  = sheets[0];
+      if (targetGid) {
+        for (var i = 0; i < sheets.length; i++) {
+          if (String(sheets[i].getSheetId()) === targetGid) { sheet = sheets[i]; break; }
+        }
+      }
+      var values = sheet.getDataRange().getValues();
+      rawObjects = _sheetValuesToObjects_(values);
+      sheetName  = sheet.getName();
+      strategy   = 'SpreadsheetApp';
+    } catch (e1) {
+
+      // ── Strategy 2: UrlFetchApp CSV export ──────────────────────────
+      var url = 'https://docs.google.com/spreadsheets/d/' + sheetId +
+                '/export?format=csv' + (targetGid ? '&gid=' + targetGid : '');
+      var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      var code = resp.getResponseCode();
+      var body = resp.getContentText();
+      if (code !== 200) throw new Error('CSV export returned HTTP ' + code);
+      if (/^<!DOCTYPE|^<html/i.test(body.trim())) {
+        throw new Error('Sheet requires sign-in or is not publicly shared.');
+      }
+      rawObjects = _parseCsvToObjects_(body);
+      sheetName  = '';
+      strategy   = 'csv-export';
     }
-    return { ok: true, rows: result.rows, _meta: result._meta || {} };
+
+    var rows = rawObjects.map(_toCanonicalRow_);
+    return { ok: true, rows: rows, _meta: { strategy: strategy, sheetName: sheetName, rowCount: rows.length } };
+
   } catch (e) {
     return { ok: false, rows: [], error: e.message || String(e) };
   }
+}
+
+// ── Inline helpers (no external dependency) ──────────────────────────────
+
+var _FETCH_ALIASES_ = {
+  bug_id:                    ['bug_id','bug id','id','bugid','issue id','case id'],
+  iem_escalation_number:     ['iem_escalation_number','iem escalation number','escalation #','escalation number','iem bug/vector case','vector case'],
+  current_assignee_ldap:     ['current_assignee_ldap','current assignee ldap','assignee','requesting poc','assigned to','owner'],
+  product_name:              ['product_name','product name','product area','product','service'],
+  priority:                  ['priority','severity','sev'],
+  customer_name:             ['customer_name','customer name','customer','account','company'],
+  subject:                   ['subject','title','issue','summary','description'],
+  last_update:               ['last_update','last update','update','latest update','notes'],
+  p0_time_to_first_update_mins: ['p0_time_to_first_update_mins','p0 time to first update (mins)','p0 fmr (mins)','p0 fmr'],
+  time_to_first_update_mins: ['time_to_first_update_mins','time to first update (mins)','fmr (mins)','fmr','first response mins','tfu'],
+  resolution_hours:          ['resolution_hours','resolution hours','age (hours)','resolution time','hours to close'],
+  created_timestamp:         ['created_timestamp','created at','created','opened at','date opened','date created'],
+  closed_timestamp:          ['closed_timestamp','closed at','closed','resolved at','date closed'],
+  status:                    ['status','state','current status'],
+  iem_escalation_type:       ['iem_escalation_type','iem escalation type','escalation type','type','category']
+};
+
+var _FETCH_ALIAS_LOOKUP_ = (function () {
+  var m = {};
+  var keys = Object.keys(_FETCH_ALIASES_);
+  for (var k = 0; k < keys.length; k++) {
+    var canon = keys[k];
+    var aliases = _FETCH_ALIASES_[canon];
+    for (var a = 0; a < aliases.length; a++) {
+      m[aliases[a].toLowerCase()] = canon;
+    }
+  }
+  return m;
+}());
+
+function _toCanonicalRow_(obj, idx) {
+  var row = {};
+  var keys = Object.keys(obj);
+  for (var i = 0; i < keys.length; i++) {
+    var h     = keys[i];
+    var canon = _FETCH_ALIAS_LOOKUP_[h.toLowerCase().trim()];
+    if (canon) row[canon] = String(obj[h] || '').trim();
+  }
+  if (!row.bug_id) row.bug_id = 'ext-' + idx;
+  return row;
+}
+
+function _sheetValuesToObjects_(values) {
+  if (!values || values.length < 2) return [];
+  var headers = values[0];
+  return values.slice(1).map(function (row) {
+    var obj = {};
+    for (var i = 0; i < headers.length; i++) {
+      obj[headers[i]] = row[i] !== undefined ? row[i] : '';
+    }
+    return obj;
+  });
+}
+
+function _parseCsvToObjects_(text) {
+  var lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+  var headers = _splitCsvLine_(lines[0]);
+  return lines.slice(1).map(function (line) {
+    var vals = _splitCsvLine_(line);
+    var obj  = {};
+    for (var i = 0; i < headers.length; i++) {
+      obj[headers[i].trim().replace(/^"|"$/g, '')] = (vals[i] || '').trim().replace(/^"|"$/g, '');
+    }
+    return obj;
+  });
+}
+
+function _splitCsvLine_(line) {
+  var result = [], cur = '', inQ = false;
+  for (var i = 0; i < line.length; i++) {
+    var c = line[i];
+    if (c === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (c === ',' && !inQ) { result.push(cur); cur = ''; }
+    else { cur += c; }
+  }
+  result.push(cur);
+  return result;
 }
 
 function getIncidentProvider_(source) {
