@@ -1,0 +1,25 @@
+Act as a UI Architect. Refactor the current IEM Dashboard into an "Executive Pulse" view. Use the provided data to build a high-density, strategic interface.
+
+[STRATEGIC MAPPING]
+- FinRisk: Header widget showing "$42.5M Total Revenue at Risk" (Aggregated from P0s like Rakuten).
+- SLA_Gauge: "88% Compliance (↓ 2%)" status indicator.
+- Heatmap: Color-code "Escalation Age" (Red > 3d, Dark Red > 7d).
+- Product_Logic: Map "Subject" keywords (e.g., "Gmail", "GPU") to a new "Product" column.
+- Capacity: Flag owners with >2 P0s (e.g., saudpirzada).
+
+[UI LAYOUT INSTRUCTIONS]
+1. TOP BANNER: 4 Summary Cards [Total Rev at Risk | SLA Health | Top Bottleneck | Avg Resolution].
+2. EXEC SUMMARY: 1-sentence dynamic brief above the table.
+3. TABLE ENHANCEMENTS: 
+   - Add "Impact ($)" column.
+   - Conditional formatting: Pulse Red for P0, Dim 'Closed' rows.
+   - Group by "Customer Tier" (Strategic/Enterprise).
+4. ANALYTICS FOOTER: 
+   - Chart A: Line (New vs Resolved) - show 15% gap.
+   - Chart B: Bar (Owner Load) - highlight 120% capacity for 'saudpirzada'.
+   - Chart C: Pie (Root Cause) - 60% "Auth/Login".
+
+[CONSTRAINTS]
+- Prioritize scannability over detail. 
+- Use Red/Yellow/Green visual cues.
+- Maintain existing 'IEM Bug ID' and 'Status' functionality.
