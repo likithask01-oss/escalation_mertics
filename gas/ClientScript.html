@@ -459,7 +459,10 @@
         '<td>' + esc(l.author) + '</td>' +
       '</tr>';
     }).join('');
-    var msgText = latest ? latest.message : 'No communications logged yet.';
+    // Prefer last comms-log message; fall back to row's last_update field
+    var msgText = latest ? latest.message
+                : (row.last_update && row.last_update.trim()) ? row.last_update.trim()
+                : 'No communications logged yet.';
     var safeMsgAttr = msgText.replace(/"/g,'&quot;');
 
     panel.innerHTML =
@@ -621,15 +624,32 @@
     if (!_allRows.length) return;
     var filterKey = getFilterKey();
 
-    // Fetch monthly and raw from data hook's last known data
-    var monthly = (window._dashData && window._dashData.monthly && window._dashData.monthly[filterKey]) || [];
-    var raw     = (window._dashData && window._dashData.raw     && window._dashData.raw[filterKey])     || [];
+    // Prefer pre-aggregated monthly; derive from live rows when absent (e.g. CSV fetch)
+    var storedMonthly = window._dashData && window._dashData.monthly && window._dashData.monthly[filterKey];
+    var monthly = (storedMonthly && storedMonthly.length)
+      ? storedMonthly
+      : _deriveMonthlyFromRows(filterKey);
 
-    var fMonthly = getFilteredMonthly(monthly, period);
-    var fRaw     = getFilteredRaw(raw, period);
+    var raw = (window._dashData && window._dashData.raw && window._dashData.raw[filterKey]) || [];
 
-    renderBarChart(fMonthly);
-    renderRawTable(fRaw);
+    renderBarChart(getFilteredMonthly(monthly, period));
+    renderRawTable(getFilteredRaw(raw, period));
+  }
+
+  /** Derives [{month:'YYYY-MM', count:N}] from _allRows for the given filter key. */
+  function _deriveMonthlyFromRows(filterKey) {
+    var filter = TAB_FILTERS[filterKey] || function () { return true; };
+    var counts = {};
+    _allRows.forEach(function (r) {
+      if (!filter(r)) return;
+      var ts = r.created_timestamp;
+      if (!ts) return;
+      var d = new Date(ts);
+      if (isNaN(d.getTime())) return;
+      var ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      counts[ym] = (counts[ym] || 0) + 1;
+    });
+    return Object.keys(counts).sort().map(function (ym) { return { month: ym, count: counts[ym] }; });
   }
 
   var PERIOD_MONTHS = { '1W':0.25,'1M':1,'3M':3,'6M':6,'Q':3,'Y':12 };
@@ -1013,10 +1033,21 @@
       _sfbStatus('No rows returned.', false);
       return;
     }
+    // Normalise bug_id: ensure "b/" prefix
+    rows = rows.map(function (r) {
+      var id = String(r.bug_id || '').trim();
+      if (id && !/^b\//i.test(id)) id = 'b/' + id;
+      return id !== r.bug_id ? Object.assign({}, r, { bug_id: id }) : r;
+    });
     _allRows = rows;
-    if (window._dashData) window._dashData.rows = rows;
+    if (window._dashData) {
+      window._dashData.rows    = rows;
+      window._dashData.monthly = {};   // clear stale pre-aggregated data; will derive from rows
+      window._dashData.raw     = {};
+    }
     showDashboard();
     renderActiveTab();
+    if (analyticsInited) applyAnalyticsFilter(activePeriod);
     _sfbStatus(rows.length + ' rows loaded' + (meta && meta.sheetName ? ' from "' + meta.sheetName + '"' : '') + '.', true);
   }
 
@@ -1464,7 +1495,11 @@
     // Subscribe to dashboard data
     useDashboardData.subscribe('change', function (data) {
       window._dashData = data;
-      _allRows = data.rows || [];
+      _allRows = (data.rows || []).map(function (r) {
+        var id = String(r.bug_id || '').trim();
+        if (id && !/^b\//i.test(id)) id = 'b/' + id;
+        return id !== r.bug_id ? Object.assign({}, r, { bug_id: id }) : r;
+      });
       updateFooter({});
       showDashboard();
       renderActiveTab();
