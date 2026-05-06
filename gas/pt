@@ -23,3 +23,11 @@ Act as a UI Architect. Refactor the current IEM Dashboard into an "Executive Pul
 - Prioritize scannability over detail. 
 - Use Red/Yellow/Green visual cues.
 - Maintain existing 'IEM Bug ID' and 'Status' functionality.
+
+
+
+
+
+2. The exact field labels and the placeholder text or inputted values within them (specifically for the "Sheet URL" and "Sheet ID").
+3. The names and positions of any interactive buttons visible inside the modal.
+4. Any micro-copy instructions or helper text displayed under the fields.
