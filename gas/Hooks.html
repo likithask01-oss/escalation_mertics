@@ -134,7 +134,7 @@ var TAB_FILTERS = {
            type.indexOf('exec escalation') !== -1;
   },
   MCS: function (r) {
-    return (r.subject || '').toLowerCase().indexOf('[mcs sf prod') !== -1;
+    return (r.subject || '').toLowerCase().indexOf('mcs sf prod') !== -1;
   },
   CUF_P0_P1: function (r) {
     var s = (r.subject || '').toLowerCase();

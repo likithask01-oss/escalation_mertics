@@ -167,6 +167,33 @@
         </div>
       </section>
 
+      <!-- ── SECTION 3: ESCALATION RECONCILIATION ──────────────────── -->
+      <section class="analytics-section" id="reconSection" aria-label="Escalation Reconciliation">
+
+        <div class="analytics-header">
+          <div class="analytics-header-left">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <span class="analytics-title">Escalation Reconciliation</span>
+          </div>
+          <span class="pill pill-red" id="reconMissingCount" style="display:none" title="Unmatched records — not visible in any sub-tab"></span>
+        </div>
+
+        <p id="reconSummary" class="recon-summary"></p>
+
+        <div class="table-wrap" style="max-height:320px">
+          <table class="incident-table" id="reconTable" aria-label="Escalation reconciliation — unmatched records">
+            <thead><tr id="reconHeaderRow"></tr></thead>
+            <tbody id="reconTbody"></tbody>
+          </table>
+        </div>
+
+        <div class="analytics-disclaimer">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Records appear here only if they pass the Escalation Management filter but match no leaf sub-tab (Exec / MCS / CUF / Social Care). An empty table means all records are correctly categorized. Root cause of prior mismatch: MCS filter used <code>[MCS SF PROD</code> (with bracket) instead of <code>MCS SF PROD</code>.
+        </div>
+
+      </section>
+
     </div><!-- /dashboardContent -->
   </main>
 

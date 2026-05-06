@@ -61,6 +61,38 @@
     return rows.filter(isActiveRow).length;
   }
 
+  /* ── Escalation Management reconciliation helpers ────────────────
+     Leaf sub-tab filters for Escalation Management in display order.
+     Used to detect EM rows that fall through all sub-tab filters
+     (the root cause of count mismatches / "missing" tickets).
+  ──────────────────────────────────────────────────────────────── */
+  var _EM_LEAF_DEFS = [
+    { key: 'EXEC_ESCALATIONS', label: 'Exec Escalation' },
+    { key: 'MCS',              label: 'MCS' },
+    { key: 'CUF_P0_P1',        label: 'CUF — P0/P1' },
+    { key: 'CUF_GUP',          label: 'CUF — gUP' },
+    { key: 'CUF_BILLING',      label: 'CUF — Billing' },
+    { key: 'SOCIAL_CARE',      label: 'Social Care' }
+  ];
+
+  /** Returns the display label of the first leaf filter that matches row r, or null. */
+  function resolveEscalationCategory(r) {
+    for (var i = 0; i < _EM_LEAF_DEFS.length; i++) {
+      if (TAB_FILTERS[_EM_LEAF_DEFS[i].key](r)) return _EM_LEAF_DEFS[i].label;
+    }
+    return null;
+  }
+
+  /** All rows passing the ESCALATION_MANAGEMENT parent filter. */
+  function getEmRows() {
+    return _allRows.filter(TAB_FILTERS.ESCALATION_MANAGEMENT);
+  }
+
+  /** EM rows not matched by any leaf sub-tab filter — these are "missing" from the UI. */
+  function getMissingEscalationRows() {
+    return getEmRows().filter(function (r) { return !resolveEscalationCategory(r); });
+  }
+
   /* ── Default sort state factory ──────────────────────────────── */
   var _DEFAULT_SORT = { col: '_status', dir: 'asc' };
 
@@ -1788,6 +1820,84 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════
+     RECONCILIATION TABLE
+     Shows EM rows that pass the parent filter but match no leaf
+     sub-tab — the "missing/unmatched" records.  Empty = healthy.
+  ══════════════════════════════════════════════════════════════════ */
+  function renderReconciliationTable() {
+    var tbody     = $('reconTbody');
+    var thead     = $('reconHeaderRow');
+    var summaryEl = $('reconSummary');
+    var countEl   = $('reconMissingCount');
+    if (!tbody || !thead) return;
+
+    var emRows      = getEmRows();
+    var missing     = getMissingEscalationRows();
+    var totalActive = countActiveRows(emRows);
+
+    // Summary line — same metric as sub-tab cards, one authoritative source
+    if (summaryEl) {
+      summaryEl.textContent = emRows.length + ' total EM records · ' +
+        totalActive + ' open · ' +
+        (missing.length === 0
+          ? 'All records correctly categorized ✓'
+          : missing.length + ' unmatched — not visible in any sub-tab ✗');
+    }
+    if (countEl) {
+      countEl.textContent   = missing.length || '';
+      countEl.style.display = missing.length > 0 ? '' : 'none';
+    }
+
+    // Columns: prepend Category to the standard ESC columns
+    var cols = [{ key: '_category', label: 'CATEGORY', sortable: false }].concat(_ESC_COLS);
+
+    // Colgroup for table-layout:fixed
+    var reconTable = $('reconTable');
+    if (reconTable) {
+      var cg = reconTable.querySelector('colgroup');
+      if (!cg) { cg = document.createElement('colgroup'); reconTable.insertBefore(cg, reconTable.firstChild); }
+      cg.innerHTML = cols.map(function (col) {
+        var w = col.key === '_category' ? '110px' : (_COL_WIDTHS[col.key] || '');
+        return '<col' + (w ? ' style="width:' + w + '"' : '') + '>';
+      }).join('');
+    }
+
+    // Header row
+    thead.innerHTML = cols.map(function (col) {
+      return '<th class="th-col"><div class="th-inner"><span class="th-label">' +
+        esc(col.label) + '</span></div></th>';
+    }).join('');
+
+    // Body
+    if (missing.length === 0) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="' + cols.length + '" class="recon-ok-cell">' +
+        '✓  All ' + emRows.length + ' Escalation Management records match a sub-tab filter. No missing records.' +
+        '</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = missing.map(function (r) {
+      var ageHours = computeEscalationAge(r);
+      var fmrMins  = r.p0_time_to_first_update_mins != null && r.p0_time_to_first_update_mins !== ''
+        ? Number(r.p0_time_to_first_update_mins) : (Number(r.time_to_first_update_mins) || null);
+      var enriched = Object.assign({}, r, {
+        _status:   deriveStatus(r),
+        _ageHours: ageHours,
+        _fmrMins:  fmrMins
+      });
+      var status  = enriched._status;
+      var ageDays = ageHours != null ? ageHours / 24 : 0;
+      var ageCls  = (status !== 'Closed' && ageHours != null)
+        ? (ageDays > 7 ? ' age-critical' : ageDays > 3 ? ' age-warn' : ' age-active') : '';
+
+      return '<tr>' +
+        '<td><span class="recon-badge-unmatched">Unmatched</span></td>' +
+        cols.slice(1).map(function (col) { return _renderCell(col, enriched, ageCls, status); }).join('') +
+        '</tr>';
+    }).join('');
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
      BOOT
   ══════════════════════════════════════════════════════════════════ */
   function loadDashboard() {
@@ -1819,6 +1929,7 @@
       showDashboard();
       renderActiveTab();
       initAnalytics();
+      renderReconciliationTable();   // keep reconciliation table in sync with data
     });
     useDashboardData.subscribe('error', function (err) {
       showError(err && err.message ? err.message : 'Failed to load dashboard data.');
