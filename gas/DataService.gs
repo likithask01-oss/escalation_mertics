@@ -88,6 +88,64 @@ function getSheetConfig() {
 }
 
 /**
+ * Returns sheet config for a specific header tab group.
+ * Falls back to the global SHEET_ID/SHEET_GID if no group-specific config.
+ */
+function getSheetConfigForGroup(groupId) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var key = 'SHEET_MAPPINGS_' + groupId;
+    var raw = props.getProperty(key);
+    if (raw) {
+      var mappings = JSON.parse(raw);
+      var active = (mappings || []).filter(function(m){ return m.enabled !== false; });
+      if (active.length) return { ok:true, mappings:active };
+    }
+    // Fallback to global config
+    var globalId = props.getProperty('SHEET_ID') || INCIDENT_CONFIG.SPREADSHEET_ID || '';
+    var globalGid = props.getProperty('SHEET_GID') || INCIDENT_CONFIG.INCIDENTS_GID || '';
+    if (globalId) return { ok:true, mappings:[{ sheetId:globalId, gid:globalGid, name:'Default', enabled:true }] };
+    return { ok:false, mappings:[] };
+  } catch(e) {
+    return { ok:false, error:e.message };
+  }
+}
+
+/**
+ * Saves per-group sheet mappings to Script Properties.
+ */
+function saveSheetMappings(groupId, mappings) {
+  try {
+    if (!groupId) throw new Error('No group ID provided');
+    PropertiesService.getScriptProperties().setProperty(
+      'SHEET_MAPPINGS_' + groupId,
+      JSON.stringify(mappings || [])
+    );
+    return { ok:true };
+  } catch(e) {
+    return { ok:false, error:e.message || String(e) };
+  }
+}
+
+/**
+ * Returns all group sheet mappings for the settings panel.
+ */
+function getAllSheetMappings() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var groups = ['INCIDENT_MANAGEMENT','ESCALATION_MANAGEMENT','SERVICE_DISRUPTION'];
+    var result = {};
+    groups.forEach(function(g){
+      var raw = props.getProperty('SHEET_MAPPINGS_' + g);
+      result[g] = raw ? JSON.parse(raw) : [];
+    });
+    return { ok:true, mappings:result };
+  } catch(e) {
+    return { ok:false, mappings:{}, error:e.message };
+  }
+}
+
+/**
  * Persists the settings panel values to Script Properties.
  * No redeploy needed — getDashboardData() always reads these at runtime.
  *

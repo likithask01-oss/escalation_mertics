@@ -1530,116 +1530,6 @@ body {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   EXECUTIVE PULSE BANNER
-══════════════════════════════════════════════════════════════════════ */
-.pulse-banner {
-  display: flex;
-  gap: 12px;
-  padding: 12px 20px 0;
-  flex-wrap: wrap;
-}
-
-.pulse-card {
-  flex: 1;
-  min-width: 160px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 16px;
-  transition: border-color 0.15s;
-}
-.pulse-card:hover { border-color: var(--accent-blue); }
-
-.pulse-card-icon {
-  width: 34px; height: 34px;
-  border-radius: 7px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 0.72rem; font-weight: 900;
-  letter-spacing: -0.02em;
-  flex-shrink: 0;
-}
-.pulse-icon-rev   { background: rgba(16,185,129,0.12);  color: var(--accent-green); }
-.pulse-icon-sla   { background: rgba(96,165,250,0.12);  color: var(--accent-blue);  font-size: 0.58rem; }
-.pulse-icon-block { background: rgba(239,68,68,0.12);   color: var(--accent-red);   font-size: 1rem; }
-.pulse-icon-res   { background: rgba(245,158,11,0.12);  color: var(--accent-amber); font-size: 0.9rem; }
-
-.pulse-card-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-
-.pulse-card-value {
-  font-size: 1.15rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--text-primary);
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.text-truncate-val {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 120px;
-}
-
-.pulse-card-label {
-  font-size: 0.60rem;
-  font-weight: 700;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  line-height: 1.3;
-}
-.pulse-sublabel {
-  font-weight: 400;
-  letter-spacing: 0.02em;
-  text-transform: none;
-  color: var(--text-faint);
-}
-.pulse-est { color: var(--text-faint); font-weight: 400; text-transform: none; letter-spacing: 0; }
-
-.kpi-good { color: var(--accent-green) !important; }
-.kpi-warn { color: var(--accent-amber) !important; }
-.kpi-bad  { color: var(--accent-red)   !important; }
-
-/* ══════════════════════════════════════════════════════════════════════
-   EXEC SUMMARY
-══════════════════════════════════════════════════════════════════════ */
-.exec-summary {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 10px 20px 0;
-  padding: 9px 14px;
-  background: rgba(96,165,250,0.06);
-  border: 1px solid rgba(96,165,250,0.18);
-  border-radius: 6px;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-  line-height: 1.5;
-}
-.theme-light .exec-summary {
-  background: rgba(37,99,235,0.04);
-  border-color: rgba(37,99,235,0.15);
-}
-.exec-summary-dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--accent-blue);
-  flex-shrink: 0;
-  animation: pulse-dot 2.5s ease-in-out infinite;
-}
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: 0.5; transform: scale(0.75); }
-}
-.exec-summary-text { flex: 1; }
-
-/* ══════════════════════════════════════════════════════════════════════
    TABLE — TIER GROUP HEADERS
 ══════════════════════════════════════════════════════════════════════ */
 .tier-group-header td {
@@ -1712,7 +1602,7 @@ body {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   ANALYTICS — 3-CHART GRID
+   ANALYTICS — CHART GRID
 ══════════════════════════════════════════════════════════════════════ */
 .analytics-charts-grid {
   display: grid;
@@ -1720,8 +1610,13 @@ body {
   gap: 12px;
   padding: 12px 0 0;
 }
+/* Single-chart layout override */
+.analytics-charts-single {
+  grid-template-columns: 1fr;
+}
 @media (max-width: 900px) {
   .analytics-charts-grid { grid-template-columns: 1fr 1fr; }
+  .analytics-charts-single { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   .analytics-charts-grid { grid-template-columns: 1fr; }
@@ -1792,4 +1687,217 @@ body {
   font-style: italic;
 }
 .analytics-disclaimer svg { flex-shrink: 0; color: var(--accent-amber); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   HEADER TAB BAR (level 1)
+══════════════════════════════════════════════════════════════════════ */
+.headertabbar {
+  display: flex;
+  align-items: stretch;
+  padding: 0 20px;
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--border);
+  gap: 0;
+  overflow-x: auto;
+}
+.headertab {
+  padding: 12px 18px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+.headertab:hover { color: var(--text-primary); }
+.headertab.active {
+  color: var(--accent-blue);
+  border-bottom-color: var(--accent-blue);
+}
+.theme-light .headertab.active { color: #2563eb; border-bottom-color: #2563eb; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   SUB-TAB CARDS (level 2)
+══════════════════════════════════════════════════════════════════════ */
+.subtab-cards-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--bg-base);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-wrap: wrap;
+}
+.subtab-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  min-width: 120px;
+  text-align: left;
+}
+.subtab-card:hover { background: var(--bg-elevated); border-color: var(--text-faint); }
+.subtab-card.active {
+  border-color: var(--accent-blue);
+  background: var(--bg-surface);
+  box-shadow: 0 0 0 1px var(--accent-blue);
+}
+.theme-light .subtab-card.active { border-color: #2563eb; box-shadow: 0 0 0 1px #2563eb; }
+.stc-icon {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.subtab-card.active .stc-icon { background: rgba(96,165,250,0.12); }
+.theme-light .subtab-card.active .stc-icon { background: rgba(37,99,235,0.08); }
+.stc-body { display: flex; flex-direction: column; gap: 1px; }
+.stc-name {
+  font-size: 0.70rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.subtab-card.active .stc-name { color: var(--accent-blue); }
+.theme-light .subtab-card.active .stc-name { color: #2563eb; }
+.stc-meta {
+  font-size: 0.60rem;
+  color: var(--text-faint);
+  letter-spacing: 0.03em;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   NESTED TAB BAR (level 3 — CUF sub-tabs)
+══════════════════════════════════════════════════════════════════════ */
+.nestedtabbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 20px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+.nestedtab {
+  padding: 5px 14px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.nestedtab:hover { background: var(--bg-hover); color: var(--text-primary); }
+.nestedtab.active {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+  color: #fff;
+}
+.theme-light .nestedtab.active { background: #2563eb; border-color: #2563eb; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   DATA SOURCE SETTINGS — Multi-sheet per group
+══════════════════════════════════════════════════════════════════════ */
+.sheet-group {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.sheet-group-hdr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+.sheet-group-icon { font-size: 0.85rem; }
+.sheet-group-label {
+  flex: 1;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.sheet-group-add-btn {
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s;
+  white-space: nowrap;
+}
+.sheet-group-add-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.sheet-rows { padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+.sheet-rows:empty::after {
+  content: 'No sheets configured. Click "+ Add Sheet" to add one.';
+  font-size: 0.62rem;
+  color: var(--text-faint);
+  padding: 6px 4px;
+  font-style: italic;
+}
+.sheet-mapping-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+}
+.smr-fields {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.smr-fields .settings-input { flex: 1; min-width: 120px; font-size: 0.68rem; padding: 5px 8px; }
+.smr-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+.smr-toggle {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.smr-remove {
+  padding: 4px 7px;
+  font-size: 0.65rem;
+  border-radius: 4px;
+  color: var(--accent-red);
+  border-color: rgba(239,68,68,0.3);
+}
+.smr-remove:hover { background: rgba(239,68,68,0.08); }
 </style>

@@ -7,11 +7,10 @@
 
   /* ── App state ───────────────────────────────────────────────────── */
   var activeTabId       = 'EXEC_ESCALATIONS';  // main tab
+  var activeHeaderTabId = 'ESCALATION_MANAGEMENT'; // level-1 header tab
   var activeCufSub      = 'CUF_P0_P1';          // CUF sub-tab
   var activePeriod      = '3M';
   var chartInstance     = null;
-  var ownerChartInstance = null;
-  var rootChartInstance  = null;
   var analyticsInited   = false;
   var selectedRowId     = null;
   var ageIntervalId     = null;
@@ -24,39 +23,75 @@
   var filterPopupCol    = null;       // which col the popup is open for
   var _allRows          = [];         // raw data from hook
 
-  /* ── Column definitions ─────────────────────────────────────────── */
-  var COL_DEFS = [
-    { key:'bug_id',                    label:'IEM BUG ID',    sortable:true  },
-    { key:'iem_escalation_number',     label:'VECTOR CASE',   sortable:true  },
-    { key:'current_assignee_ldap',     label:'CURRENT OWNER', sortable:true  },
-    { key:'product_name',              label:'PRODUCT',       sortable:true  },
-    { key:'priority',                  label:'PRIORITY',      sortable:true  },
-    { key:'customer_name',             label:'CUSTOMER NAME', sortable:true  },
-    { key:'_impact',                   label:'IMPACT ($)',    sortable:false },
-    { key:'subject',                   label:'SUBJECT',       sortable:true  },
-    { key:'last_update',               label:'LATEST UPDATE', sortable:false },
-    { key:'_fmr',                      label:'FMR',           sortable:true  },
-    { key:'_age',                      label:'ESCALATION AGE',sortable:true  },
-    { key:'_status',                   label:'STATUS',        sortable:true  }
-  ];
+  /* ── Column definitions are config-driven (from TAB_UTILS) ─────── */
+  function getActiveColDefs() {
+    var ctx = TAB_UTILS.resolveTabContext(getFilterKey());
+    return (ctx && ctx.columns && ctx.columns.length) ? ctx.columns : _ESC_COLS;
+  }
+  // Keep COL_DEFS as a live getter for backward compat
+  Object.defineProperty(window, 'COL_DEFS_COMPAT', { get: getActiveColDefs });
 
-  /* ── Tab registry ────────────────────────────────────────────────── */
-  var TABS = [
-    { id:'EXEC_ESCALATIONS', label:'EXEC ESCALATIONS', chartTitle:'IEM Escalations — Exec' },
-    { id:'MCS',              label:'MCS',              chartTitle:'IEM Escalations — MCS' },
-    { id:'CUF_ESCALATIONS',  label:'CUF ESCALATIONS',  chartTitle:'IEM Escalations — CUF' },
-    { id:'SOCIAL_CARE',      label:'SOCIAL CARE',      chartTitle:'IEM Escalations — Social Care' }
-  ];
-
-  var CUF_SUBS = [
-    { id:'CUF_P0_P1',   chartTitle:'IEM Escalations — CUF P0/P1' },
-    { id:'CUF_GUP',     chartTitle:'IEM Escalations — CUF gUP' },
-    { id:'CUF_BILLING', chartTitle:'IEM Escalations — CUF Billing' }
-  ];
+  /* ── Tab registry (derived from TABS_CONFIG) ─────────────────────── */
+  var TABS = (function() {
+    var all = [];
+    Object.keys(TABS_CONFIG).forEach(function(hk) {
+      TABS_CONFIG[hk].children.forEach(function(sub) { all.push({ id:sub.id, label:sub.label.toUpperCase(), chartTitle:'IEM — ' + sub.label }); });
+    });
+    return all;
+  }());
+  var CUF_SUBS = (TABS_CONFIG.ESCALATION_MANAGEMENT.children.filter(function(c){ return c.id === 'CUF_ESCALATIONS'; })[0]||{children:[]}).children.map(function(c){ return { id:c.id, chartTitle:'IEM Escalations — ' + c.label }; });
 
   /* ── Returns the filter key for the currently active view ─────── */
   function getFilterKey() {
-    return activeTabId === 'CUF_ESCALATIONS' ? activeCufSub : activeTabId;
+    if (activeTabId === 'CUF_ESCALATIONS') return activeCufSub;
+    return activeTabId || activeHeaderTabId;
+  }
+
+  /* ── Render sub-tab cards (level 2) ─────────────────────────────── */
+  function renderSubTabCards() {
+    var container = $('subTabCardsBar');
+    if (!container) return;
+
+    var hcfg = TABS_CONFIG[activeHeaderTabId];
+    if (!hcfg || !hcfg.children) { container.innerHTML = ''; return; }
+
+    container.innerHTML = hcfg.children.map(function (child) {
+      var isActive = activeTabId === child.id;
+      var filterKey = child.id;
+      // For CUF parent, count all CUF rows
+      var filter = TAB_FILTERS[filterKey] || function(){ return true; };
+      var activeCount = _allRows.filter(function(r){
+        return filter(r) && (!r.closed_timestamp || String(r.closed_timestamp).trim() === '');
+      }).length;
+      var totalCount = _allRows.filter(filter).length;
+      var iconStr = child.icon || '●';
+      return '<button class="subtab-card' + (isActive ? ' active' : '') + '" ' +
+        'role="tab" aria-selected="' + (isActive ? 'true' : 'false') + '" ' +
+        'data-tab="' + child.id + '">' +
+        '<div class="stc-icon">' + iconStr + '</div>' +
+        '<div class="stc-body">' +
+          '<div class="stc-name">' + esc(child.label) + '</div>' +
+          '<div class="stc-meta">' + activeCount + ' active' + (totalCount ? ' / ' + totalCount : '') + '</div>' +
+        '</div>' +
+      '</button>';
+    }).join('');
+
+    container.querySelectorAll('.subtab-card').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tid = btn.dataset.tab;
+        var tabCfg = TAB_UTILS.lookup(tid);
+        // If this tab has children, switch to first child
+        if (tabCfg && tabCfg.node.children && tabCfg.node.children.length) {
+          activeTabId = tid;
+          renderSubTabCards();
+          var nested = $('nestedTabBar');
+          if (nested) nested.style.display = '';
+          switchCufSub(tabCfg.node.children[0].id);
+        } else {
+          switchTab(tid);
+        }
+      });
+    });
   }
 
   /* ── useClickOutside ─────────────────────────────────────────────
@@ -148,7 +183,7 @@
   function initColumnHeaders() {
     var tr = $('tableHeaderRow');
     if (!tr) return;
-    tr.innerHTML = COL_DEFS.map(function (col) {
+    tr.innerHTML = getActiveColDefs().map(function (col) {
       var sortBtns = col.sortable
         ? '<button class="th-sort-btn s-unsorted" data-sort-col="' + col.key + '" aria-label="Sort by ' + col.label + '" title="Sort">' +
             /* unsorted icon */ '<svg class="ic-sort-un" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 9l4-4 4 4"/><path d="M16 15l-4 4-4-4"/></svg>' +
@@ -283,6 +318,85 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════
+     DYNAMIC CELL RENDERER
+     Produces a <td> string for any column key.
+  ══════════════════════════════════════════════════════════════════ */
+  function _renderCell(col, r, ageCls, status) {
+    var k = col.key;
+    // ── Special computed columns ─────────────────────────────────
+    if (k === '_status') {
+      return '<td>' + statusCell(status) + '</td>';
+    }
+    if (k === '_age') {
+      return '<td><span class="age-cell' + (ageCls || '') + '">' + esc(formatResolutionAge(r._ageHours)) + '</span></td>';
+    }
+    if (k === '_fmr') {
+      return '<td><span class="fmr-cell ' + fmrClass(r._fmrMins) + '">' + esc(formatFmr(r._fmrMins)) + '</span></td>';
+    }
+    if (k === '_impact') {
+      return '<td class="td-impact">' + esc(r.impact || '—') + '</td>';
+    }
+    // ── bug_id — buganizer link ───────────────────────────────────
+    if (k === 'bug_id') {
+      var numId = esc(String(r.bug_id || '').replace(/^b\//i, ''));
+      return '<td class="bold mono"><a class="rd-id" href="https://b.corp.google.com/issues/' + numId +
+        '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(r.bug_id) + '</a></td>';
+    }
+    // ── IEM escalation number ─────────────────────────────────────
+    if (k === 'iem_escalation_number') {
+      return '<td class="mono">' + esc(r.iem_escalation_number) + '</td>';
+    }
+    // ── LDAP owner ───────────────────────────────────────────────
+    if (k === 'current_assignee_ldap') {
+      return '<td class="bold">' + esc(r.current_assignee_ldap) + '</td>';
+    }
+    // ── Priority / severity badge ─────────────────────────────────
+    if (k === 'priority') {
+      return '<td>' + priorityBadge(r.priority) + '</td>';
+    }
+    if (k === 'severity') {
+      return '<td>' + priorityBadge(r.severity) + '</td>';
+    }
+    // ── Subject (truncate with title) ─────────────────────────────
+    if (k === 'subject') {
+      return '<td class="td-subject" title="' + esc(r.subject) + '">' + esc(r.subject) + '</td>';
+    }
+    // ── Last update (muted + title) ───────────────────────────────
+    if (k === 'last_update') {
+      return '<td class="td-update muted" title="' + esc(r.last_update) + '">' + esc(r.last_update) + '</td>';
+    }
+    // ── URL columns — render as clickable link if non-empty ───────
+    if (k === 'brisk_url' || k === 'psh_url' || k === 'psh_csh') {
+      var url = String(r[k] || '').trim();
+      if (url && (url.indexOf('http') === 0 || url.indexOf('//') === 0)) {
+        return '<td><a class="rd-id" href="' + esc(url) + '" target="_blank" rel="noopener" ' +
+          'onclick="event.stopPropagation()" title="' + esc(url) + '">' +
+          esc(url.length > 28 ? url.slice(0, 26) + '…' : url) + '</a></td>';
+      }
+      return '<td class="muted">' + esc(url || '—') + '</td>';
+    }
+    // ── Meta bug — buganizer link ─────────────────────────────────
+    if (k === 'meta_bug') {
+      var mb = String(r.meta_bug || '').trim();
+      if (mb) {
+        var mbNum = mb.replace(/^b\//i, '');
+        return '<td class="mono"><a class="rd-id" href="https://b.corp.google.com/issues/' + esc(mbNum) +
+          '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(mb) + '</a></td>';
+      }
+      return '<td class="muted">—</td>';
+    }
+    // ── SLO Y/N — colour-coded ────────────────────────────────────
+    if (k === 'slo_yn') {
+      var slo = String(r.slo_yn || '').trim().toUpperCase();
+      var sloCls = slo === 'Y' ? 'fmr-good' : slo === 'N' ? 'fmr-bad' : '';
+      return '<td>' + (slo ? '<span class="fmr-cell ' + sloCls + '">' + esc(slo) + '</span>' : '<span class="muted">—</span>') + '</td>';
+    }
+    // ── Generic fallback ─────────────────────────────────────────
+    var val = r[k];
+    return '<td>' + esc(val == null || val === '' ? '—' : val) + '</td>';
+  }
+
+  /* ══════════════════════════════════════════════════════════════════
      INCIDENT TABLE RENDER
   ══════════════════════════════════════════════════════════════════ */
   function getActiveRows() {
@@ -312,8 +426,9 @@
     });
 
     // 2. Apply column filters
+    var _colDefs = getActiveColDefs();
     rows = rows.filter(function (r) {
-      return COL_DEFS.every(function (col) {
+      return _colDefs.every(function (col) {
         var f = (colFilters[col.key] || '').toLowerCase().trim();
         if (!f) return true;
         var val = col.key === '_age'    ? formatResolutionAge(r._ageHours)
@@ -348,7 +463,7 @@
     // 5. Render rows with tier group headers
     if (!pageItems.length) {
       var hasFilter = Object.keys(colFilters).some(function (k) { return colFilters[k]; });
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="' + COL_DEFS.length + '">' +
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="' + _colDefs.length + '">' +
         (hasFilter ? 'No results match the current filters.' : 'No escalations for this category.') +
         '</td></tr>';
       return;
@@ -371,7 +486,7 @@
       if (tier !== currentTier) {
         currentTier = tier;
         var tierIcon = tier === 'Strategic' ? '★' : '◆';
-        html += '<tr class="tier-group-header"><td colspan="' + COL_DEFS.length + '">' +
+        html += '<tr class="tier-group-header"><td colspan="' + _colDefs.length + '">' +
           '<span class="tier-icon">' + tierIcon + '</span>' +
           '<span class="tier-label">' + esc(tier) + '</span>' +
           '<span class="tier-count">' + tierCounts[tier] + ' escalation' + (tierCounts[tier] !== 1 ? 's' : '') + '</span>' +
@@ -393,18 +508,7 @@
       html +=
         '<tr data-id="' + esc(r.bug_id) + '" data-created="' + esc(r.created_timestamp) + '"' +
         ' tabindex="0"' + (rowCls ? ' class="' + rowCls + '"' : '') + '>' +
-        /* IEM Bug ID */    '<td class="bold mono"><a class="rd-id" href="https://b.corp.google.com/issues/' + esc(r.bug_id.replace(/^b\//i,'')) + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + esc(r.bug_id) + '</a></td>' +
-        /* Vector Case */   '<td class="mono">' + esc(r.iem_escalation_number) + '</td>' +
-        /* Current Owner */ '<td class="bold">' + esc(r.current_assignee_ldap) + '</td>' +
-        /* Product */       '<td>' + esc(r.product_name) + '</td>' +
-        /* Priority */      '<td>' + priorityBadge(r.priority) + '</td>' +
-        /* Customer */      '<td>' + esc(r.customer_name) + '</td>' +
-        /* Impact ($) */    '<td class="td-impact">' + esc(r.impact || '—') + '</td>' +
-        /* Subject */       '<td class="td-subject" title="' + esc(r.subject) + '">' + esc(r.subject) + '</td>' +
-        /* Latest Update */ '<td class="td-update muted" title="' + esc(r.last_update) + '">' + esc(r.last_update) + '</td>' +
-        /* FMR */           '<td><span class="fmr-cell ' + fmrClass(r._fmrMins) + '">' + esc(formatFmr(r._fmrMins)) + '</span></td>' +
-        /* Escalation Age */'<td><span class="age-cell' + ageCls + '">' + esc(formatResolutionAge(r._ageHours)) + '</span></td>' +
-        /* Status */        '<td>' + statusCell(status) + '</td>' +
+        _colDefs.map(function(col) { return _renderCell(col, r, ageCls, status); }).join('') +
         '</tr>';
     });
     tbody.innerHTML = html;
@@ -450,12 +554,18 @@
   function navigateToIncident(bugId, tabKey) {
     closeNotifDropdown();
     var mainTab, cufSub;
+    // CUF nested tabs route through CUF_ESCALATIONS parent
     if (tabKey === 'CUF_P0_P1' || tabKey === 'CUF_GUP' || tabKey === 'CUF_BILLING') {
       mainTab = 'CUF_ESCALATIONS';
       cufSub  = tabKey;
     } else {
       mainTab = tabKey;
       cufSub  = null;
+    }
+    // Ensure the correct header tab is active first
+    var targetHeader = TAB_UTILS.getHeaderTab(mainTab);
+    if (targetHeader && targetHeader !== activeHeaderTabId) {
+      switchHeaderTab(targetHeader);
     }
     switchTab(mainTab);
     if (cufSub) switchCufSub(cufSub);
@@ -574,12 +684,41 @@
      TAB NAVIGATION
   ══════════════════════════════════════════════════════════════════ */
   function initTabs() {
-    document.querySelectorAll('.tab').forEach(function (btn) {
-      btn.addEventListener('click', function () { switchTab(btn.dataset.tab); });
+    // Header tabs
+    document.querySelectorAll('.headertab').forEach(function (btn) {
+      btn.addEventListener('click', function () { switchHeaderTab(btn.dataset.header); });
     });
-    document.querySelectorAll('.subtab').forEach(function (btn) {
-      btn.addEventListener('click', function () { switchCufSub(btn.dataset.cuf); });
+    // Nested (CUF) tabs
+    document.querySelectorAll('.nestedtab').forEach(function (btn) {
+      btn.addEventListener('click', function () { switchCufSub(btn.dataset.nested); });
     });
+    // Render initial sub-tab cards
+    renderSubTabCards();
+  }
+
+  function switchHeaderTab(headerId) {
+    activeHeaderTabId = headerId;
+
+    // Update header tab active state
+    document.querySelectorAll('.headertab').forEach(function (b) {
+      var on = b.dataset.header === headerId;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+
+    // Select first sub-tab of this header
+    var hcfg = TABS_CONFIG[headerId];
+    if (hcfg && hcfg.children && hcfg.children.length) {
+      var firstChild = hcfg.children[0];
+      activeTabId = firstChild.id;
+      // If first child itself has children (e.g. CUF), select first nested
+      if (firstChild.children && firstChild.children.length) {
+        activeCufSub = firstChild.children[0].id;
+      }
+    }
+
+    renderSubTabCards();
+    switchTab(activeTabId);
   }
 
   function switchTab(tabId) {
@@ -589,15 +728,16 @@
     colFilters    = {};
     sortState     = { col:'created_timestamp', dir:'desc' };
 
-    document.querySelectorAll('.tab').forEach(function (b) {
-      var on = b.dataset.tab === tabId;
-      b.classList.toggle('active', on);
-      b.setAttribute('aria-selected', on ? 'true' : 'false');
-    });
+    // Sync activeHeaderTabId from config
+    var newHeader = TAB_UTILS.getHeaderTab(tabId);
+    if (newHeader && newHeader !== tabId) activeHeaderTabId = newHeader;
 
-    // Show/hide CUF sub-tab bar
-    var cufBar = $('cufSubTabBar');
-    if (cufBar) cufBar.style.display = (tabId === 'CUF_ESCALATIONS') ? '' : 'none';
+    // Update sub-tab card active states (re-render)
+    renderSubTabCards();
+
+    // Show/hide CUF nested tab bar
+    var nestedBar = $('nestedTabBar');
+    if (nestedBar) nestedBar.style.display = (tabId === 'CUF_ESCALATIONS') ? '' : 'none';
 
     closeCommsPanel();
     closeFilterPopup();
@@ -611,8 +751,8 @@
     colFilters    = {};
     sortState     = { col:'created_timestamp', dir:'desc' };
 
-    document.querySelectorAll('.subtab').forEach(function (b) {
-      var on = b.dataset.cuf === subId;
+    document.querySelectorAll('.nestedtab').forEach(function (b) {
+      var on = b.dataset.nested === subId;
       b.classList.toggle('active', on);
       b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
@@ -628,7 +768,8 @@
     var tab = TABS.filter(function (t) { return t.id === activeTabId; })[0] || TABS[0];
 
     var labelEl = $('activeTabLabel');
-    if (labelEl) labelEl.textContent = tab.label;
+    var ctx = TAB_UTILS.resolveTabContext(getFilterKey());
+    if (labelEl) labelEl.textContent = ctx ? ctx.node.label.toUpperCase() : (tab ? tab.label : '');
 
     var activeRows  = getActiveRows();
     var activeCount = activeRows.filter(function (r) { return !r.closed_timestamp; }).length;
@@ -639,8 +780,6 @@
     initColumnHeaders();
     updateSortIcons();
     renderIncidentTable();
-    renderPulseBanner(activeRows);
-    renderExecSummary(activeRows);
 
     clearInterval(ageIntervalId);
 
@@ -675,12 +814,6 @@
       ? storedMonthly
       : _deriveMonthlyFromRows(filterKey);
     renderBarChart(getFilteredMonthly(monthly, period));
-
-    // Chart B — Bar: Owner Load (open per assignee)
-    renderOwnerChart();
-
-    // Chart C — Doughnut: Root Cause by product
-    renderRootCauseChart();
   }
 
   /** Derives [{month:'YYYY-MM', count:N, resolved:N}] from _allRows for the given filter key. */
@@ -811,122 +944,6 @@
       }
     });
   }
-
-  /* ── Chart B: Horizontal bar — Owner Load ────────────────────── */
-  function renderOwnerChart() {
-    var isDark  = document.body.classList.contains('theme-dark');
-    var gridClr = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
-    var textClr = isDark ? '#71717a' : '#64748b';
-
-    var filterKey = getFilterKey();
-    var filter    = TAB_FILTERS[filterKey] || function () { return true; };
-    var openRows  = _allRows.filter(function (r) {
-      if (!filter(r)) return false;
-      return !r.closed_timestamp || String(r.closed_timestamp).trim() === '';
-    });
-
-    var counts = {};
-    openRows.forEach(function (r) {
-      var o = (r.current_assignee_ldap || 'Unassigned').trim();
-      counts[o] = (counts[o] || 0) + 1;
-    });
-    var sorted = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 8);
-    var values = sorted.map(function (k) { return counts[k]; });
-
-    var currentLdap = (window._currentUser && window._currentUser.ldap) || '';
-    var BLUE = isDark ? 'rgba(96,165,250,0.70)' : 'rgba(37,99,235,0.60)';
-    var GOLD = isDark ? '#f59e0b' : '#d97706';
-    var colors = sorted.map(function (k) { return k === currentLdap ? GOLD : BLUE; });
-
-    if (ownerChartInstance) { ownerChartInstance.destroy(); ownerChartInstance = null; }
-    var ctx = $('ownerChart');
-    if (!ctx) return;
-    ownerChartInstance = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: sorted,
-        datasets: [{
-          label: 'Open',
-          data: values,
-          backgroundColor: colors,
-          borderRadius: 3,
-          borderSkipped: 'left'
-        }]
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { label: function (c) { return ' ' + c.raw + ' open'; } } }
-        },
-        scales: {
-          x: { beginAtZero: true, grid: { color: gridClr }, ticks: { color: textClr, font: { size: 10 }, precision: 0 } },
-          y: { grid: { display: false }, ticks: { color: textClr, font: { size: 10 } } }
-        }
-      }
-    });
-  }
-
-  /* ── Chart C: Doughnut — Root Cause by product ───────────────── */
-  function renderRootCauseChart() {
-    var isDark   = document.body.classList.contains('theme-dark');
-    var textClr  = isDark ? '#71717a' : '#64748b';
-
-    var filterKey = getFilterKey();
-    var filter    = TAB_FILTERS[filterKey] || function () { return true; };
-    var rows      = _allRows.filter(filter);
-
-    var counts = {};
-    rows.forEach(function (r) {
-      var p = (r.product_name || 'Unknown').trim() || 'Unknown';
-      counts[p] = (counts[p] || 0) + 1;
-    });
-    var sorted = Object.keys(counts).sort(function (a, b) { return counts[b] - counts[a]; }).slice(0, 7);
-    var values = sorted.map(function (k) { return counts[k]; });
-    var total  = values.reduce(function (s, v) { return s + v; }, 0);
-
-    var PALETTE_DARK  = ['#60a5fa','#34d399','#f59e0b','#f87171','#a78bfa','#38bdf8','#fb923c'];
-    var PALETTE_LIGHT = ['#2563eb','#059669','#d97706','#dc2626','#7c3aed','#0284c7','#ea580c'];
-    var palette = isDark ? PALETTE_DARK : PALETTE_LIGHT;
-
-    if (rootChartInstance) { rootChartInstance.destroy(); rootChartInstance = null; }
-    var ctx = $('rootChart');
-    if (!ctx) return;
-    rootChartInstance = new Chart(ctx, {
-      type: 'doughnut',
-      data: {
-        labels: sorted,
-        datasets: [{
-          data: values,
-          backgroundColor: palette.slice(0, sorted.length),
-          borderWidth: 1,
-          borderColor: isDark ? '#18181b' : '#ffffff'
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: { color: textClr, font: { size: 9 }, boxWidth: 10, padding: 8 }
-          },
-          tooltip: {
-            callbacks: {
-              label: function (c) {
-                var pct = total > 0 ? Math.round(c.raw / total * 100) : 0;
-                return ' ' + c.label + ': ' + c.raw + ' (' + pct + '%)';
-              }
-            }
-          }
-        },
-        cutout: '58%'
-      }
-    });
-  }
-
 
   /* ══════════════════════════════════════════════════════════════════
      LOGO + USER AVATAR
@@ -1297,17 +1314,89 @@
     sheetGid:   ''
   };
 
+  var _sheetMappings = {
+    INCIDENT_MANAGEMENT:   [],
+    ESCALATION_MANAGEMENT: [],
+    SERVICE_DISRUPTION:    []
+  };
+  var _activeDataSource = 'publicSheet';
+
+  function _renderSheetRow(groupId, mapping, rowIndex) {
+    var prefix = 'sm_' + groupId + '_' + rowIndex;
+    return '<div class="sheet-mapping-row" data-group="' + groupId + '" data-idx="' + rowIndex + '">' +
+      '<div class="smr-fields">' +
+        '<input class="settings-input smr-name" id="' + prefix + '_name" type="text" placeholder="Display Name" value="' + esc(mapping.name||'') + '">' +
+        '<input class="settings-input smr-url" id="' + prefix + '_url" type="text" placeholder="Sheet URL or ID" value="' + esc(mapping.url||mapping.sheetId||'') + '">' +
+        '<input class="settings-input smr-gid" id="' + prefix + '_gid" type="text" placeholder="GID (optional)" value="' + esc(mapping.gid||'') + '" style="max-width:100px">' +
+      '</div>' +
+      '<div class="smr-actions">' +
+        '<label class="smr-toggle"><input type="checkbox" class="smr-enabled"' + (mapping.enabled !== false ? ' checked' : '') + '> Active</label>' +
+        '<button class="smr-remove btn-secondary" type="button" data-group="' + groupId + '" data-idx="' + rowIndex + '">✕</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function _initSheetMappingsUI() {
+    // Wire "Add Sheet" buttons
+    document.querySelectorAll('.sheet-group-add-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var groupId = btn.dataset.group;
+        if (!_sheetMappings[groupId]) _sheetMappings[groupId] = [];
+        _sheetMappings[groupId].push({ name:'', url:'', gid:'', enabled:true });
+        _renderSheetRowsForGroup(groupId);
+      });
+    });
+  }
+
+  function _renderSheetRowsForGroup(groupId) {
+    var container = $('sheetRows_' + groupId);
+    if (!container) return;
+    var mappings = _sheetMappings[groupId] || [];
+    container.innerHTML = mappings.map(function (m, i) {
+      return _renderSheetRow(groupId, m, i);
+    }).join('');
+
+    // Wire remove buttons
+    container.querySelectorAll('.smr-remove').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = parseInt(btn.dataset.idx, 10);
+        _sheetMappings[groupId].splice(idx, 1);
+        _renderSheetRowsForGroup(groupId);
+      });
+    });
+  }
+
+  function _readSheetMappingsFromUI() {
+    ['INCIDENT_MANAGEMENT','ESCALATION_MANAGEMENT','SERVICE_DISRUPTION'].forEach(function (groupId) {
+      var container = $('sheetRows_' + groupId);
+      if (!container) return;
+      var rows = container.querySelectorAll('.sheet-mapping-row');
+      _sheetMappings[groupId] = [];
+      rows.forEach(function (row) {
+        var idx = parseInt(row.dataset.idx, 10);
+        var prefix = 'sm_' + groupId + '_' + idx;
+        var nameEl    = $(prefix + '_name');
+        var urlEl     = $(prefix + '_url');
+        var gidEl     = $(prefix + '_gid');
+        var enabledEl = row.querySelector('.smr-enabled');
+        _sheetMappings[groupId].push({
+          name:    nameEl    ? nameEl.value.trim()    : '',
+          url:     urlEl     ? urlEl.value.trim()     : '',
+          sheetId: urlEl     ? _parseSheetUrl(urlEl.value.trim()) : '',
+          gid:     gidEl     ? gidEl.value.trim()     : '',
+          enabled: enabledEl ? enabledEl.checked      : true
+        });
+      });
+    });
+  }
+
   function initSettings() {
     var settingsBtn  = $('settingsBtn');
     var backdrop     = $('settingsBackdrop');
     var closeBtn     = $('settingsCloseBtn');
     var cancelBtn    = $('settingsCancelBtn');
     var saveBtn      = $('settingsSaveBtn');
-    var discoverBtn  = $('discoverTabsBtn');
     var testBtn      = $('testConnBtn');
-    var urlInput     = $('settingsSheetUrl');
-    var idInput      = $('settingsSheetId');
-    var gidManual    = $('settingsGidManual');
     var sourceBtns   = document.querySelectorAll('.source-btn');
 
     if (!settingsBtn || !backdrop) return;
@@ -1332,28 +1421,10 @@
         sourceBtns.forEach(function (b) { b.classList.remove('active'); });
         btn.classList.add('active');
         _settingsState.dataSource = btn.dataset.source;
+        _activeDataSource = btn.dataset.source;
         _updateSourceSections();
       });
     });
-
-    // Auto-extract sheet ID from pasted URL
-    urlInput.addEventListener('input', function () {
-      var extracted = _parseSheetUrl(urlInput.value.trim());
-      if (extracted) {
-        idInput.value = extracted;
-        _settingsState.sheetId = extracted;
-      }
-      _settingsState.sheetUrl = urlInput.value.trim();
-    });
-    idInput.addEventListener('input', function () {
-      _settingsState.sheetId = idInput.value.trim();
-    });
-    gidManual.addEventListener('input', function () {
-      _settingsState.sheetGid = gidManual.value.trim();
-    });
-
-    // Discover tabs
-    discoverBtn.addEventListener('click', handleDiscoverTabs);
 
     // Test connection
     testBtn.addEventListener('click', handleTestConnection);
@@ -1361,6 +1432,7 @@
     // Save
     saveBtn.addEventListener('click', handleSaveConfig);
 
+    _initSheetMappingsUI();
     _updateSourceSections();
   }
 
@@ -1377,23 +1449,28 @@
         .withSuccessHandler(function (cfg) { _applyConfig(cfg); })
         .withFailureHandler(function ()    { /* use defaults */ })
         .getSheetConfig();
+      // Also load all sheet mappings
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (res && res.ok && res.mappings) {
+            _sheetMappings = res.mappings;
+            ['INCIDENT_MANAGEMENT','ESCALATION_MANAGEMENT','SERVICE_DISRUPTION'].forEach(_renderSheetRowsForGroup);
+          }
+        })
+        .withFailureHandler(function () { /* ignore */ })
+        .getAllSheetMappings();
     }
   }
 
   function _applyConfig(cfg) {
     if (!cfg) return;
     _settingsState.dataSource = cfg.dataSource || 'publicSheet';
+    _activeDataSource = _settingsState.dataSource;
     _settingsState.sheetUrl   = cfg.sheetUrl   || '';
     _settingsState.sheetId    = cfg.sheetId    || '';
     _settingsState.sheetGid   = cfg.sheetGid   || '';
 
-    var urlInput  = $('settingsSheetUrl');
-    var idInput   = $('settingsSheetId');
-    var gidManual = $('settingsGidManual');
-    var apiUrl    = $('settingsApiUrl');
-    if (urlInput)  urlInput.value  = _settingsState.sheetUrl;
-    if (idInput)   idInput.value   = _settingsState.sheetId;
-    if (gidManual) gidManual.value = _settingsState.sheetGid;
+    var apiUrl = $('settingsApiUrl');
     if (apiUrl && cfg.apiUrl) apiUrl.value = cfg.apiUrl;
 
     // Update source toggle
@@ -1405,17 +1482,17 @@
   }
 
   function _updateSourceSections() {
-    var sheetSection  = $('sheetSection');
+    var sheetMappingsSection = $('sheetMappingsSection');
     var apiSection    = $('apiSection');
     var hintEl        = $('sourceHint');
     var src           = _settingsState.dataSource;
 
-    if (sheetSection)  sheetSection.style.display  = (src === 'publicSheet') ? '' : 'none';
+    if (sheetMappingsSection) sheetMappingsSection.style.display = (src === 'publicSheet') ? '' : 'none';
     if (apiSection)    apiSection.style.display     = (src === 'api')         ? '' : 'none';
 
     var hints = {
       mock:        'Dashboard will use built-in mock data. No external source needed.',
-      publicSheet: 'Pull live data from a Google Sheet using the sheet ID or URL below.',
+      publicSheet: 'Pull live data from Google Sheets mapped per section below.',
       api:         'Pull live data from a REST API endpoint.'
     };
     if (hintEl) hintEl.textContent = hints[src] || '';
@@ -1433,112 +1510,43 @@
     return '';
   }
 
-  /* ── Discover tabs ─────────────────────────────────────────────── */
-  function handleDiscoverTabs() {
-    var idInput   = $('settingsSheetId');
-    var urlInput  = $('settingsSheetUrl');
-    var discoverBtn = $('discoverTabsBtn');
-    var id = (idInput && idInput.value.trim()) || _parseSheetUrl(urlInput && urlInput.value.trim());
-    if (!id) {
-      _settingsStatusShow(false, 'Enter a Sheet URL or Sheet ID first.');
-      return;
-    }
-
-    discoverBtn.disabled    = true;
-    discoverBtn.textContent = 'Discovering…';
-
-    if (typeof google !== 'undefined' && google.script) {
-      google.script.run
-        .withSuccessHandler(function (res) {
-          discoverBtn.disabled    = false;
-          discoverBtn.innerHTML   = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Discover Tabs';
-          if (!res.ok) { _settingsStatusShow(false, res.error || 'Failed to list tabs.'); return; }
-          _renderTabList(res.tabs || []);
-        })
-        .withFailureHandler(function (e) {
-          discoverBtn.disabled    = false;
-          discoverBtn.innerHTML   = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Discover Tabs';
-          _settingsStatusShow(false, (e && e.message) ? e.message : 'Could not reach sheet.');
-        })
-        .listSheetTabs(id);
-    } else {
-      // Local dev: simulate
-      discoverBtn.disabled    = false;
-      discoverBtn.innerHTML   = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Discover Tabs';
-      _renderTabList([
-        { name:'Escalations', gid:'0',          rowCount:42 },
-        { name:'OnCall',      gid:'1234567890', rowCount:6  },
-        { name:'CommsLog',    gid:'9876543210', rowCount:88 }
-      ]);
-    }
-  }
-
-  function _renderTabList(tabs) {
-    var section  = $('tabListSection');
-    var listEl   = $('tabList');
-    var hintEl   = $('tabListHint');
-    var manualEl = $('manualGidSection');
-    if (!section || !listEl) return;
-
-    listEl.innerHTML = '';
-    if (!tabs || tabs.length === 0) {
-      hintEl.textContent = 'No tabs found in this spreadsheet.';
-      section.style.display  = '';
-      if (manualEl) manualEl.style.display = '';
-      return;
-    }
-
-    tabs.forEach(function (tab) {
-      var item = document.createElement('div');
-      item.className = 'tab-list-item';
-      item.setAttribute('role', 'option');
-      item.setAttribute('aria-selected', 'false');
-      item.dataset.gid  = tab.gid;
-      item.dataset.name = tab.name;
-      item.innerHTML =
-        '<span class="tli-name">' + _esc(tab.name) + '</span>' +
-        '<span class="tli-meta">GID: ' + _esc(tab.gid) + ' &nbsp;·&nbsp; ' + tab.rowCount + ' rows</span>';
-      item.addEventListener('click', function () {
-        listEl.querySelectorAll('.tab-list-item').forEach(function (el) {
-          el.classList.remove('selected');
-          el.setAttribute('aria-selected', 'false');
-        });
-        item.classList.add('selected');
-        item.setAttribute('aria-selected', 'true');
-        var gidInput = $('settingsGid');
-        if (gidInput) gidInput.value = tab.gid;
-        _settingsState.sheetGid = tab.gid;
-        if (hintEl) hintEl.textContent = 'Selected: "' + tab.name + '" (GID ' + tab.gid + ')';
-      });
-      listEl.appendChild(item);
-    });
-
-    if (hintEl) hintEl.textContent = 'Click the tab that contains your escalation data.';
-    section.style.display  = '';
-    if (manualEl) manualEl.style.display = '';
-  }
-
   /* ── Test connection ──────────────────────────────────────────── */
   function handleTestConnection() {
     var testBtn = $('testConnBtn');
-    var id      = _settingsState.sheetId || _parseSheetUrl(_settingsState.sheetUrl);
     if (_settingsState.dataSource === 'mock') {
       _settingsStatusShow(true, 'Mock mode — no external connection needed.');
       return;
     }
-    if (!id && _settingsState.dataSource === 'publicSheet') {
-      _settingsStatusShow(false, 'Enter a Sheet URL or Sheet ID first.');
+
+    // Read current UI state first
+    _readSheetMappingsFromUI();
+
+    // Find first enabled mapping across all groups for a quick test
+    var testMapping = null;
+    var groups = ['ESCALATION_MANAGEMENT','INCIDENT_MANAGEMENT','SERVICE_DISRUPTION'];
+    for (var gi = 0; gi < groups.length && !testMapping; gi++) {
+      var gMappings = _sheetMappings[groups[gi]] || [];
+      for (var mi = 0; mi < gMappings.length; mi++) {
+        if (gMappings[mi].enabled !== false && (gMappings[mi].url || gMappings[mi].sheetId)) {
+          testMapping = gMappings[mi];
+          break;
+        }
+      }
+    }
+
+    if (!testMapping && _settingsState.dataSource === 'publicSheet') {
+      _settingsStatusShow(false, 'Add at least one sheet mapping first.');
       return;
     }
 
     testBtn.disabled    = true;
     testBtn.textContent = 'Testing…';
 
-    var cfg = {
-      sheetUrl: _settingsState.sheetUrl,
-      sheetId:  id,
-      sheetGid: _settingsState.sheetGid
-    };
+    var cfg = testMapping ? {
+      sheetUrl: testMapping.url || '',
+      sheetId:  testMapping.sheetId || _parseSheetUrl(testMapping.url || ''),
+      sheetGid: testMapping.gid || ''
+    } : { sheetUrl:'', sheetId:'', sheetGid:'' };
 
     if (typeof google !== 'undefined' && google.script) {
       google.script.run
@@ -1570,6 +1578,10 @@
   function handleSaveConfig() {
     var saveBtn = $('settingsSaveBtn');
     var apiUrl  = $('settingsApiUrl');
+
+    // Read current sheet mappings from UI
+    _readSheetMappingsFromUI();
+
     var cfg = {
       dataSource: _settingsState.dataSource,
       sheetUrl:   _settingsState.sheetUrl,
@@ -1582,20 +1594,35 @@
     saveBtn.textContent = 'Saving…';
 
     if (typeof google !== 'undefined' && google.script) {
+      // Save base config first, then sheet mappings for each group
       google.script.run
         .withSuccessHandler(function (res) {
-          saveBtn.disabled = false;
-          saveBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Save &amp; Reload';
           if (res && res.ok) {
-            // Also flip the frontend endpoint type so the running hook picks up the new source
-            DATA_ENDPOINT.type = cfg.dataSource === 'publicSheet' ? 'gas'
-                               : cfg.dataSource === 'mock'        ? 'mock'
-                               : cfg.dataSource === 'api'         ? 'rest'
-                               : 'gas';
-            $('settingsBackdrop').style.display = 'none';
-            showToast('Settings saved. Reloading data…', 2000);
-            setTimeout(loadDashboard, 2200);
+            // Save per-group sheet mappings
+            var groups = ['INCIDENT_MANAGEMENT','ESCALATION_MANAGEMENT','SERVICE_DISRUPTION'];
+            var pending = groups.length;
+            groups.forEach(function (groupId) {
+              google.script.run
+                .withSuccessHandler(function () {
+                  pending--;
+                  if (pending === 0) {
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Save &amp; Reload';
+                    DATA_ENDPOINT.type = cfg.dataSource === 'publicSheet' ? 'gas'
+                                       : cfg.dataSource === 'mock'        ? 'mock'
+                                       : cfg.dataSource === 'api'         ? 'rest'
+                                       : 'gas';
+                    $('settingsBackdrop').style.display = 'none';
+                    showToast('Settings saved. Reloading data…', 2000);
+                    setTimeout(loadDashboard, 2200);
+                  }
+                })
+                .withFailureHandler(function () { pending--; })
+                .saveSheetMappings(groupId, _sheetMappings[groupId] || []);
+            });
           } else {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Save &amp; Reload';
             _settingsStatusShow(false, (res && res.error) ? res.error : 'Save failed.');
           }
         })
@@ -1647,110 +1674,6 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════
-     EXECUTIVE PULSE BANNER
-  ══════════════════════════════════════════════════════════════════ */
-  function renderPulseBanner(rows) {
-    var el = $('pulseBanner');
-    if (!el) return;
-    if (!rows || !rows.length) { el.innerHTML = ''; return; }
-
-    // Enrich rows with status + age
-    var enriched = rows.map(function (r) {
-      var status = r._status || deriveStatus(r);
-      var ageH   = r._ageHours != null ? r._ageHours : computeEscalationAge(r);
-      return Object.assign({}, r, { _status: status, _ageHours: ageH });
-    });
-
-    var open   = enriched.filter(function (r) { return r._status !== 'Closed'; });
-    var closed = enriched.filter(function (r) { return r._status === 'Closed' && r._ageHours; });
-    var total  = enriched.length;
-
-    // Card 1 — Revenue at Risk
-    var revRisk = 0, hasRevData = false;
-    open.forEach(function (r) {
-      var v = parseFloat(String(r.impact || r.revenue_at_risk || '').replace(/[^0-9.]/g, ''));
-      if (!isNaN(v) && v > 0) { revRisk += v; hasRevData = true; }
-    });
-    var revText = hasRevData
-      ? '$' + (revRisk >= 1e6 ? (revRisk / 1e6).toFixed(1) + 'M' : revRisk.toLocaleString())
-      : '$' + (open.length * 1.5).toFixed(1) + 'M';
-    var revSub = hasRevData ? '' : 'est. · no impact data';
-
-    // Card 2 — SLA Health
-    var slaOk = 0;
-    enriched.forEach(function (r) {
-      var limit = r.priority === 'P0' ? 24 : 72;
-      if (!r._ageHours || r._ageHours <= limit) slaOk++;
-    });
-    var slaHealth = total > 0 ? Math.round(slaOk / total * 100) : 100;
-    var slaCls    = slaHealth >= 90 ? 'kpi-good' : slaHealth >= 75 ? 'kpi-warn' : 'kpi-bad';
-
-    // Card 3 — Top Bottleneck
-    var ownerCounts = {};
-    open.forEach(function (r) {
-      var o = (r.current_assignee_ldap || 'Unassigned').trim();
-      ownerCounts[o] = (ownerCounts[o] || 0) + 1;
-    });
-    var topOwner = Object.keys(ownerCounts).sort(function (a, b) { return ownerCounts[b] - ownerCounts[a]; })[0] || '—';
-    var topCount = topOwner !== '—' ? ownerCounts[topOwner] : 0;
-
-    // Card 4 — Avg Resolution
-    var avgRes = '—';
-    if (closed.length > 0) {
-      var sumH = closed.reduce(function (s, r) { return s + r._ageHours; }, 0);
-      var avgH = sumH / closed.length;
-      avgRes = avgH >= 48 ? (avgH / 24).toFixed(1) + 'd' : avgH.toFixed(1) + 'h';
-    }
-
-    el.innerHTML =
-      _pulseCard('$', 'pulse-icon-rev', esc(revText), 'Total Rev at Risk', revSub ? '<span class="pulse-est">' + esc(revSub) + '</span>' : '', '') +
-      _pulseCard('SLA', 'pulse-icon-sla', '<span class="' + slaCls + '">' + slaHealth + '%</span>', 'SLA Health', open.length + ' open · ' + (total - open.length) + ' closed', '') +
-      _pulseCard('!', 'pulse-icon-block', '<span class="text-truncate-val">' + esc(topOwner) + '</span>', 'Top Bottleneck', topCount ? topCount + ' open cases' : '', '') +
-      _pulseCard('⏱', 'pulse-icon-res', esc(avgRes), 'Avg Resolution', closed.length + ' closed cases', '');
-  }
-
-  function _pulseCard(icon, iconCls, valueHtml, label, sublabel, extraCls) {
-    return '<div class="pulse-card' + (extraCls ? ' ' + extraCls : '') + '">' +
-      '<div class="pulse-card-icon ' + iconCls + '">' + icon + '</div>' +
-      '<div class="pulse-card-body">' +
-        '<div class="pulse-card-value">' + valueHtml + '</div>' +
-        '<div class="pulse-card-label">' + esc(label) + (sublabel ? ' <span class="pulse-sublabel">' + sublabel + '</span>' : '') + '</div>' +
-      '</div>' +
-    '</div>';
-  }
-
-  /* ── Exec Summary (1-sentence brief above table) ─────────────── */
-  function renderExecSummary(rows) {
-    var el = $('execSummary');
-    if (!el) return;
-    if (!rows || !rows.length) { el.style.display = 'none'; return; }
-
-    var enriched  = rows.map(function (r) { return Object.assign({}, r, { _status: r._status || deriveStatus(r) }); });
-    var open      = enriched.filter(function (r) { return r._status !== 'Closed'; });
-    var p0        = open.filter(function (r) { return r.priority === 'P0'; });
-
-    // Top product by open count
-    var prodCounts = {};
-    open.forEach(function (r) { var p = (r.product_name || '').trim(); if (p) prodCounts[p] = (prodCounts[p] || 0) + 1; });
-    var topProd = Object.keys(prodCounts).sort(function (a, b) { return prodCounts[b] - prodCounts[a]; })[0] || '';
-
-    var brief;
-    if (p0.length > 0) {
-      brief = p0.length + ' critical P0 escalation' + (p0.length > 1 ? 's' : '') +
-        ' active' + (topProd ? ' in ' + topProd : '') +
-        ' — ' + open.length + ' total open case' + (open.length !== 1 ? 's' : '') + ' require immediate attention.';
-    } else if (open.length > 0) {
-      brief = open.length + ' open escalation' + (open.length !== 1 ? 's' : '') + ' in progress' +
-        (topProd ? ', primarily in ' + topProd : '') + ' — no critical P0 issues at this time.';
-    } else {
-      brief = 'All escalations are resolved — no active incidents in this view.';
-    }
-
-    el.innerHTML = '<span class="exec-summary-dot"></span><span class="exec-summary-text">' + esc(brief) + '</span>';
-    el.style.display = '';
-  }
-
-  /* ══════════════════════════════════════════════════════════════════
      BOOT
   ══════════════════════════════════════════════════════════════════ */
   function loadDashboard() {
@@ -1789,7 +1712,6 @@
 
     // Subscribe to current user (avatar — show LDAP)
     useCurrentUser.subscribe(function (u) {
-      window._currentUser = u;   // used by renderOwnerChart to highlight current owner
       var el = $('userAvatar');
       if (!el || !u) return;
       var ldap = u.ldap || (u.name ? u.name.toLowerCase().replace(/\s+/g, '') : u.initials);

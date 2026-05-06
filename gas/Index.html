@@ -54,19 +54,21 @@
     </div>
   </nav>
 
-  <!-- ── MAIN TAB BAR (4 tabs) ─────────────────────────────────────────── -->
-  <div class="tabbar" role="tablist" aria-label="Escalation categories">
-    <button class="tab active" role="tab" aria-selected="true"  data-tab="EXEC_ESCALATIONS" id="tab-EXEC">Exec Escalations</button>
-    <button class="tab"        role="tab" aria-selected="false" data-tab="MCS"               id="tab-MCS">MCS</button>
-    <button class="tab"        role="tab" aria-selected="false" data-tab="CUF_ESCALATIONS"   id="tab-CUF">CUF Escalations</button>
-    <button class="tab"        role="tab" aria-selected="false" data-tab="SOCIAL_CARE"       id="tab-SOC">Social Care Escalation</button>
-  </div>
+  <!-- ── HEADER TABS (level 1) ────────────────────────────────────── -->
+  <nav class="headertabbar" role="tablist" aria-label="Dashboard sections">
+    <button class="headertab" role="tab" aria-selected="false" data-header="INCIDENT_MANAGEMENT">Incident Management</button>
+    <button class="headertab active" role="tab" aria-selected="true"  data-header="ESCALATION_MANAGEMENT">Escalation Management</button>
+    <button class="headertab" role="tab" aria-selected="false" data-header="SERVICE_DISRUPTION">Service Disruption Reporting</button>
+  </nav>
 
-  <!-- ── CUF SUB-TAB BAR (visible only when CUF tab is active) ─────────── -->
-  <div class="subtabbar" id="cufSubTabBar" style="display:none" role="tablist" aria-label="CUF sub-categories">
-    <button class="subtab active" role="tab" aria-selected="true"  data-cuf="CUF_P0_P1"   >P0 / P1</button>
-    <button class="subtab"        role="tab" aria-selected="false" data-cuf="CUF_GUP"     >gUP</button>
-    <button class="subtab"        role="tab" aria-selected="false" data-cuf="CUF_BILLING" >Billing</button>
+  <!-- ── SUB-TAB CARDS (level 2 — dynamically rendered) ────────────── -->
+  <div class="subtab-cards-bar" id="subTabCardsBar" role="tablist" aria-label="Sub-categories"></div>
+
+  <!-- ── NESTED TABS (level 3 — only CUF Escalation) ──────────────── -->
+  <div class="nestedtabbar" id="nestedTabBar" style="display:none" role="tablist" aria-label="CUF sub-categories">
+    <button class="nestedtab active" role="tab" aria-selected="true"  data-nested="CUF_P0_P1">P0 / P1</button>
+    <button class="nestedtab"        role="tab" aria-selected="false" data-nested="CUF_GUP">gUP</button>
+    <button class="nestedtab"        role="tab" aria-selected="false" data-nested="CUF_BILLING">Billing</button>
   </div>
 
   <!-- ── MAIN ──────────────────────────────────────────────────────────── -->
@@ -93,12 +95,6 @@
         <span class="section-label" id="activeTabLabel">EXEC ESCALATIONS</span>
         <span class="pill" id="activeTabCount"></span>
       </div>
-
-      <!-- ── EXECUTIVE PULSE BANNER ────────────────────────────────── -->
-      <div id="pulseBanner" class="pulse-banner"></div>
-
-      <!-- ── EXEC SUMMARY ──────────────────────────────────────────── -->
-      <div id="execSummary" class="exec-summary" style="display:none"></div>
 
       <!-- ── SECTION 1: LIVE ESCALATIONS TABLE ───────────────────────── -->
       <section class="card" id="liveEscCard">
@@ -147,7 +143,7 @@
           </div>
         </div>
 
-        <div class="analytics-charts-grid">
+        <div class="analytics-charts-grid analytics-charts-single">
 
           <!-- Chart A: New vs Resolved (line) -->
           <div class="analytics-chart-card card">
@@ -161,26 +157,6 @@
             <div class="chart-legend">
               <span class="legend-item"><span class="legend-swatch swatch-bar"></span>New</span>
               <span class="legend-item"><span class="legend-swatch swatch-resolved"></span>Resolved</span>
-            </div>
-          </div>
-
-          <!-- Chart B: Owner Load (horizontal bar) -->
-          <div class="analytics-chart-card card">
-            <div class="analytics-panel-hdr">
-              <span class="analytics-panel-title">Owner Load</span>
-            </div>
-            <div class="chart-container-wrap">
-              <canvas id="ownerChart" aria-label="Bar chart: open escalations per owner"></canvas>
-            </div>
-          </div>
-
-          <!-- Chart C: Root Cause (doughnut) -->
-          <div class="analytics-chart-card card">
-            <div class="analytics-panel-hdr">
-              <span class="analytics-panel-title">Root Cause</span>
-            </div>
-            <div class="chart-container-wrap chart-pie-wrap">
-              <canvas id="rootChart" aria-label="Doughnut chart: root cause by product"></canvas>
             </div>
           </div>
 
@@ -238,55 +214,50 @@
 
       <div class="modal-body settings-body">
 
-        <!-- Source toggle -->
+        <!-- Source mode toggle -->
         <div class="settings-section">
-          <div class="settings-section-title">Data Source</div>
+          <div class="settings-section-title">Data Source Mode</div>
           <div class="source-toggle" role="group" aria-label="Select data source">
             <button class="source-btn" data-source="mock"        type="button">Mock</button>
             <button class="source-btn active" data-source="publicSheet" type="button">Google Sheet</button>
             <button class="source-btn" data-source="api"         type="button">REST API</button>
           </div>
-          <p class="settings-hint" id="sourceHint">Pull live data from a Google Sheet using the sheet ID or URL below.</p>
+          <p class="settings-hint" id="sourceHint">Pull live data from Google Sheets mapped per section below.</p>
         </div>
 
-        <!-- Sheet URL / ID -->
-        <div class="settings-section" id="sheetSection">
-          <div class="settings-section-title">Google Sheet</div>
+        <!-- Per-header-tab sheet mappings -->
+        <div class="settings-section" id="sheetMappingsSection">
+          <div class="settings-section-title">Sheet Mappings by Section</div>
+          <p class="settings-hint">Each section can have one or more sheet sources. The active source feeds that section's tabs.</p>
 
-          <div class="settings-field">
-            <label class="settings-label" for="settingsSheetUrl">Sheet URL <span class="settings-optional">(or paste the URL)</span></label>
-            <input class="settings-input" id="settingsSheetUrl" type="text"
-                   placeholder="https://docs.google.com/spreadsheets/d/…"
-                   autocomplete="off" spellcheck="false" />
-          </div>
-
-          <div class="settings-field">
-            <label class="settings-label" for="settingsSheetId">Sheet ID</label>
-            <div class="settings-row">
-              <input class="settings-input" id="settingsSheetId" type="text"
-                     placeholder="e.g. 1SKir-kwioaUyPGkLh9y7HnYkKvwkFar8aWcU0vj8T1Q"
-                     autocomplete="off" spellcheck="false" />
-              <button class="btn-secondary discover-btn" id="discoverTabsBtn" type="button">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                Discover Tabs
-              </button>
+          <!-- Incident Management -->
+          <div class="sheet-group" data-group="INCIDENT_MANAGEMENT">
+            <div class="sheet-group-hdr">
+              <span class="sheet-group-icon">⚡</span>
+              <span class="sheet-group-label">Incident Management</span>
+              <button class="sheet-group-add-btn" data-group="INCIDENT_MANAGEMENT" type="button">+ Add Sheet</button>
             </div>
-            <p class="settings-hint">Leave blank to auto-extract from the URL above.</p>
+            <div class="sheet-rows" id="sheetRows_INCIDENT_MANAGEMENT"></div>
           </div>
 
-          <!-- Tab list (hidden until "Discover Tabs" is clicked) -->
-          <div class="settings-field" id="tabListSection" style="display:none">
-            <label class="settings-label" for="settingsGid">Sheet Tab <span class="settings-optional">(select the incidents tab)</span></label>
-            <div class="tab-list" id="tabList" role="listbox" aria-label="Available sheet tabs"></div>
-            <!-- Hidden input keeps the selected GID -->
-            <input type="hidden" id="settingsGid" value="">
-            <p class="settings-hint" id="tabListHint"></p>
+          <!-- Escalation Management -->
+          <div class="sheet-group" data-group="ESCALATION_MANAGEMENT">
+            <div class="sheet-group-hdr">
+              <span class="sheet-group-icon">🚨</span>
+              <span class="sheet-group-label">Escalation Management</span>
+              <button class="sheet-group-add-btn" data-group="ESCALATION_MANAGEMENT" type="button">+ Add Sheet</button>
+            </div>
+            <div class="sheet-rows" id="sheetRows_ESCALATION_MANAGEMENT"></div>
           </div>
 
-          <div class="settings-field" id="manualGidSection" style="display:none">
-            <label class="settings-label" for="settingsGidManual">Tab GID <span class="settings-optional">(if known)</span></label>
-            <input class="settings-input" id="settingsGidManual" type="text"
-                   placeholder="e.g. 1238638795" autocomplete="off" />
+          <!-- Service Disruption Reporting -->
+          <div class="sheet-group" data-group="SERVICE_DISRUPTION">
+            <div class="sheet-group-hdr">
+              <span class="sheet-group-icon">📊</span>
+              <span class="sheet-group-label">Service Disruption Reporting</span>
+              <button class="sheet-group-add-btn" data-group="SERVICE_DISRUPTION" type="button">+ Add Sheet</button>
+            </div>
+            <div class="sheet-rows" id="sheetRows_SERVICE_DISRUPTION"></div>
           </div>
         </div>
 

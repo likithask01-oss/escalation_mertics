@@ -16,6 +16,114 @@ var DATA_ENDPOINT = {
   headers:    {}        // e.g. { 'Authorization': 'Bearer TOKEN' }
 };
 
+/* ══════════════════════════════════════════════════════════════════════
+   TAB HIERARCHY CONFIG — single source of truth
+══════════════════════════════════════════════════════════════════════ */
+var _ESC_COLS = [
+  { key:'bug_id', label:'IEM BUG ID', sortable:true },
+  { key:'iem_escalation_number', label:'VECTOR CASE', sortable:true },
+  { key:'current_assignee_ldap', label:'CURRENT OWNER', sortable:true },
+  { key:'product_name', label:'PRODUCT', sortable:true },
+  { key:'priority', label:'PRIORITY', sortable:true },
+  { key:'customer_name', label:'CUSTOMER NAME', sortable:true },
+  { key:'_impact', label:'IMPACT ($)', sortable:false },
+  { key:'subject', label:'SUBJECT', sortable:true },
+  { key:'last_update', label:'LATEST UPDATE', sortable:false },
+  { key:'_fmr', label:'FMR', sortable:true },
+  { key:'_age', label:'ESCALATION AGE', sortable:true },
+  { key:'_status', label:'STATUS', sortable:true }
+];
+var _INC_COLS = [
+  { key:'bug_id', label:'IEM BUG ID', sortable:true },
+  { key:'omg_id', label:'OMG ID', sortable:true },
+  { key:'current_assignee_ldap', label:'CURRENT OWNER', sortable:true },
+  { key:'product_name', label:'PRODUCT', sortable:true },
+  { key:'severity', label:'SEVERITY', sortable:true },
+  { key:'subject', label:'SUBJECT', sortable:true },
+  { key:'_status', label:'STATUS', sortable:true },
+  { key:'brisk_url', label:'BRISK URL', sortable:false },
+  { key:'psh_url', label:'PSH URL', sortable:false },
+  { key:'meta_bug', label:'META BUG', sortable:true },
+  { key:'slo_yn', label:'SLO Y/N', sortable:true },
+  { key:'ttfvp', label:'TTFVP', sortable:true },
+  { key:'ttfap', label:'TTFAP', sortable:true }
+];
+var _SDR_BASE_COLS = function(docKey, docLabel) {
+  return [
+    { key:'bug_id', label:'IEM BUG ID', sortable:true },
+    { key:'current_assignee_ldap', label:'CURRENT OWNER', sortable:true },
+    { key:'subject', label:'SUBJECT', sortable:true },
+    { key:docKey, label:docLabel, sortable:false },
+    { key:'psh_csh', label:'PSH/CSH', sortable:false },
+    { key:'start_time', label:'START TIME', sortable:true },
+    { key:'_status', label:'STATUS', sortable:true },
+    { key:'slo_yn', label:'SLO Y/N', sortable:true },
+    { key:'ttdir', label:'TTDIR', sortable:true }
+  ];
+};
+
+var TABS_CONFIG = {
+  INCIDENT_MANAGEMENT: {
+    id: 'INCIDENT_MANAGEMENT', label: 'Incident Management', icon: '⚡',
+    children: [
+      { id:'GCP',     label:'GCP',  icon:'☁', columns:_INC_COLS },
+      { id:'GWS',     label:'GWS',  icon:'📧', columns:_INC_COLS },
+      { id:'CMI',     label:'CMI',  icon:'🔧', columns:_INC_COLS },
+      { id:'CSS_TAB', label:'CSS',  icon:'🛠', columns:_INC_COLS }
+    ]
+  },
+  ESCALATION_MANAGEMENT: {
+    id: 'ESCALATION_MANAGEMENT', label: 'Escalation Management', icon: '🚨',
+    children: [
+      { id:'EXEC_ESCALATIONS', label:'Exec Escalation',      icon:'👔', columns:_ESC_COLS },
+      { id:'MCS',              label:'MCS',                  icon:'📋', columns:_ESC_COLS },
+      { id:'CUF_ESCALATIONS',  label:'CUF Escalation',       icon:'📂', columns:_ESC_COLS,
+        children: [
+          { id:'CUF_P0_P1',   label:'P0/P1',    columns:_ESC_COLS },
+          { id:'CUF_GUP',     label:'gUP',      columns:_ESC_COLS },
+          { id:'CUF_BILLING', label:'Billing',  columns:_ESC_COLS }
+        ]
+      },
+      { id:'SOCIAL_CARE', label:'Social Care Escalation', icon:'💬', columns:_ESC_COLS }
+    ]
+  },
+  SERVICE_DISRUPTION: {
+    id: 'SERVICE_DISRUPTION', label: 'Service Disruption Reporting', icon: '📊',
+    children: [
+      { id:'PRELIM_IR', label:'Preliminary IR', icon:'📝', columns:_SDR_BASE_COLS('pir_doc','PIR DOC') },
+      { id:'FULL_IR',   label:'Full IR',        icon:'📑', columns:_SDR_BASE_COLS('ir_doc','IR DOC') },
+      { id:'CISR',      label:'CISR',           icon:'🔍', columns:(function(){
+        var c = _SDR_BASE_COLS('cisr_doc','CISR DOC');
+        return c.filter(function(col){ return col.key !== 'psh_csh'; });
+      }()) },
+      { id:'IS_TAB',    label:'IS',             icon:'📌', columns:(function(){
+        var c = _SDR_BASE_COLS('is_doc','IS DOC');
+        return c.filter(function(col){ return col.key !== 'psh_csh'; });
+      }()) }
+    ]
+  }
+};
+
+/* ── Tab utility helpers ─────────────────────────────────────────── */
+var TAB_UTILS = (function(cfg) {
+  var _lut = {};
+  function _walk(node, path, parent) {
+    _lut[node.id] = { node:node, path:path.concat(node.id), parent:parent };
+    if (node.children) node.children.forEach(function(c){ _walk(c, path.concat(node.id), node); });
+  }
+  Object.keys(cfg).forEach(function(k){ _walk(cfg[k], [], null); });
+  return {
+    getTabPath:      function(id){ return (_lut[id]||{}).path || [id]; },
+    getParentTab:    function(id){ return (_lut[id]||{}).parent || null; },
+    getHeaderTab:    function(id){ var p=(_lut[id]||{}).path||[]; return p[0]||id; },
+    resolveTabContext:function(id){ var i=_lut[id]; if(!i) return null; var p=i.path; return {header:p[0]||null,sub:p[1]||null,nested:p[2]||null,node:i.node,columns:i.node.columns||[]}; },
+    getColumns:      function(id){ var i=_lut[id]; return i?(i.node.columns||[]):_ESC_COLS; },
+    getHeaderTabs:   function(){ return Object.keys(cfg).map(function(k){ return cfg[k]; }); },
+    getHeaderConfig: function(id){ return cfg[id]||null; },
+    lookup:          function(id){ return _lut[id]||null; }
+  };
+}(TABS_CONFIG));
+
 /* ── Tab filter functions (presentation calls these) ─────────────── */
 var TAB_FILTERS = {
   EXEC_ESCALATIONS: function (r) {
@@ -42,7 +150,28 @@ var TAB_FILTERS = {
   },
   SOCIAL_CARE: function (r) {
     return (r.iem_escalation_type || '').toLowerCase().indexOf('social care') !== -1;
-  }
+  },
+  // ── Incident Management stubs (match by iem_escalation_type or source tab field)
+  GCP:     function (r) { var t=(r.iem_escalation_type||r.source_tab||'').toLowerCase(); return t.indexOf('gcp')!== -1; },
+  GWS:     function (r) { var t=(r.iem_escalation_type||r.source_tab||'').toLowerCase(); return t.indexOf('gws')!== -1; },
+  CMI:     function (r) { var t=(r.iem_escalation_type||r.source_tab||'').toLowerCase(); return t.indexOf('cmi')!== -1; },
+  CSS_TAB: function (r) { var t=(r.iem_escalation_type||r.source_tab||'').toLowerCase(); return t.indexOf('css')!== -1; },
+  // ── Service Disruption stubs
+  PRELIM_IR: function (r) { var t=(r.iem_escalation_type||r.source_tab||'').toLowerCase(); return t.indexOf('prelim') !== -1 || t.indexOf('pir') !== -1; },
+  FULL_IR:   function (r) { var t=(r.iem_escalation_type||r.source_tab||'').toLowerCase(); return t.indexOf('full ir') !== -1 || t.indexOf('fir') !== -1; },
+  CISR:      function (r) { var t=(r.iem_escalation_type||r.source_tab||'').toLowerCase(); return t.indexOf('cisr') !== -1; },
+  IS_TAB:    function (r) { var t=(r.iem_escalation_type||r.source_tab||'').toLowerCase(); return t.indexOf('is tab') !== -1 || t.indexOf('incident summary') !== -1; },
+  // ── Parent-level aggregates (pass-through to children)
+  CUF_ESCALATIONS: function (r) {
+    var s = (r.subject || '').toLowerCase();
+    var t = (r.iem_escalation_type || '').toLowerCase();
+    return s.indexOf('cuf - account team') !== -1 || s.indexOf('cuf - other') !== -1 ||
+           s.indexOf('cuf - tsgm') !== -1 || s.indexOf('cuf - gup') !== -1 ||
+           t.indexOf('billing related') !== -1 || t.indexOf('cuf escalation') !== -1;
+  },
+  ESCALATION_MANAGEMENT: function (r) { return true; },
+  INCIDENT_MANAGEMENT:   function (r) { return false; },
+  SERVICE_DISRUPTION:    function (r) { return false; }
 };
 
 /* ── Shared helpers (consumed by ClientScript) ───────────────────── */
