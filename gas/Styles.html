@@ -271,7 +271,10 @@ body {
 
 /* ── Incident table ───────────────────────────────────────────────────── */
 .table-wrap { overflow-x: auto; overflow-y: auto; max-height: 420px; }
-.incident-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; text-align: left; }
+.incident-table {
+  width: 100%; border-collapse: collapse; font-size: 0.75rem; text-align: left;
+  table-layout: fixed;   /* columns respect colgroup widths; no horizontal overflow */
+}
 .incident-table thead tr {
   background: var(--bg-base);
   border-bottom: 1px solid var(--border);
@@ -282,6 +285,7 @@ body {
   letter-spacing: 0.15em; text-transform: uppercase;
   color: var(--text-muted);
   white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
 }
 .incident-table tbody tr {
   border-bottom: 1px solid var(--border-subtle);
@@ -295,6 +299,7 @@ body {
   padding: 10px 14px;
   color: var(--text-secondary);
   white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
 }
 .incident-table td.mono { color: var(--text-muted); font-size: 0.72rem; }
 .incident-table td.bold { color: var(--text-primary); font-weight: 600; }
@@ -1193,10 +1198,9 @@ body {
 }
 .col-filter-clear-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
-/* ── Truncated table cells for long text ──────────────────────────────── */
+/* ── Truncated table cells for long text (colgroup sets final widths) ─── */
 .td-subject,
 .td-update {
-  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1900,4 +1904,26 @@ body {
   border-color: rgba(239,68,68,0.3);
 }
 .smr-remove:hover { background: rgba(239,68,68,0.08); }
+
+/* Settings — Sheet mapping field groups with helper text */
+.smr-url-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+}
+.smr-field-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.smr-field-row > * { flex: 1; min-width: 100px; }
+.smr-hint {
+  font-size: 0.58rem;
+  color: var(--text-faint);
+  font-style: italic;
+  line-height: 1.3;
+  padding: 0 2px;
+}
 </style>

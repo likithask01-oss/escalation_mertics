@@ -18,10 +18,51 @@
   var filterPopupCleanup = null;
   var currentPage       = 1;
   var PAGE_SIZE         = 10;
-  var sortState         = { col: 'created_timestamp', dir: 'desc' };
+  var sortState         = { col: '_status', dir: 'asc' };
   var colFilters        = {};         // { [colKey]: filterString }
   var filterPopupCol    = null;       // which col the popup is open for
   var _allRows          = [];         // raw data from hook
+
+  /* ── Per-column widths for table-layout:fixed colgroup ──────────
+     Columns NOT listed here get no width attribute → share remaining
+     space (subject, pir_doc, ir_doc, cisr_doc, is_doc).
+  ─────────────────────────────────────────────────────────────── */
+  var _COL_WIDTHS = {
+    bug_id:                   '86px',
+    iem_escalation_number:    '86px',
+    omg_id:                   '86px',
+    current_assignee_ldap:    '96px',
+    product_name:             '86px',
+    priority:                 '62px',
+    severity:                 '62px',
+    customer_name:            '106px',
+    last_update:              '130px',
+    _fmr:                     '62px',
+    _age:                     '82px',
+    _status:                  '106px',
+    _impact:                  '74px',
+    brisk_url:                '82px',
+    psh_url:                  '82px',
+    psh_csh:                  '82px',
+    meta_bug:                 '82px',
+    slo_yn:                   '56px',
+    ttfvp:                    '62px',
+    ttfap:                    '62px',
+    ttdir:                    '62px',
+    start_time:               '90px'
+    // subject, pir_doc, ir_doc, cisr_doc, is_doc → no explicit width (flex fill)
+  };
+
+  /* ── Centralized active-row predicate (single source of truth) ── */
+  function isActiveRow(r) {
+    return !r.closed_timestamp || String(r.closed_timestamp).trim() === '';
+  }
+  function countActiveRows(rows) {
+    return rows.filter(isActiveRow).length;
+  }
+
+  /* ── Default sort state factory ──────────────────────────────── */
+  var _DEFAULT_SORT = { col: '_status', dir: 'asc' };
 
   /* ── Column definitions are config-driven (from TAB_UTILS) ─────── */
   function getActiveColDefs() {
@@ -60,9 +101,7 @@
       var filterKey = child.id;
       // For CUF parent, count all CUF rows
       var filter = TAB_FILTERS[filterKey] || function(){ return true; };
-      var activeCount = _allRows.filter(function(r){
-        return filter(r) && (!r.closed_timestamp || String(r.closed_timestamp).trim() === '');
-      }).length;
+      var activeCount = _allRows.filter(function(r){ return filter(r) && isActiveRow(r); }).length;
       var totalCount = _allRows.filter(filter).length;
       var iconStr = child.icon || '●';
       return '<button class="subtab-card' + (isActive ? ' active' : '') + '" ' +
@@ -166,9 +205,22 @@
     return (p === 'P0') ? 'Strategic' : 'Enterprise';
   }
 
+  /* ── Status sort priority (lower = shown first when dir=asc) ──── */
+  var _STATUS_PRIORITY = {
+    'In Progress': 0, 'Investigating': 0, 'Monitoring': 0,
+    'Customer Update Pending': 0,
+    'Unknown': 1,
+    'Closed': 2
+  };
+  function statusSortVal(row) {
+    var s = row._status || deriveStatus(row);
+    var p = _STATUS_PRIORITY[s];
+    return p !== undefined ? p : 1;
+  }
+
   /* ── Sort value extractor ────────────────────────────────────── */
   function sortVal(row, col) {
-    if (col === '_status') return row._status || deriveStatus(row);
+    if (col === '_status') return statusSortVal(row);
     if (col === '_age')    return row._ageHours != null ? row._ageHours : -1;
     if (col === '_fmr')    return Number(row._fmrMins) || 0;
     if (col === 'created_timestamp') return new Date(row.created_timestamp).getTime() || 0;
@@ -181,9 +233,23 @@
      icon buttons for every column defined in COL_DEFS.
   ══════════════════════════════════════════════════════════════════ */
   function initColumnHeaders() {
-    var tr = $('tableHeaderRow');
+    var tr    = $('tableHeaderRow');
+    var table = $('liveEscTable');
     if (!tr) return;
-    tr.innerHTML = getActiveColDefs().map(function (col) {
+
+    var cols = getActiveColDefs();
+
+    // Build/update <colgroup> so table-layout:fixed distributes widths correctly
+    if (table) {
+      var cg = table.querySelector('colgroup');
+      if (!cg) { cg = document.createElement('colgroup'); table.insertBefore(cg, table.firstChild); }
+      cg.innerHTML = cols.map(function (col) {
+        var w = _COL_WIDTHS[col.key] || '';
+        return '<col' + (w ? ' style="width:' + w + '"' : '') + '>';
+      }).join('');
+    }
+
+    tr.innerHTML = cols.map(function (col) {
       var sortBtns = col.sortable
         ? '<button class="th-sort-btn s-unsorted" data-sort-col="' + col.key + '" aria-label="Sort by ' + col.label + '" title="Sort">' +
             /* unsorted icon */ '<svg class="ic-sort-un" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M8 9l4-4 4 4"/><path d="M16 15l-4 4-4-4"/></svg>' +
@@ -726,7 +792,7 @@
     selectedRowId = null;
     currentPage   = 1;
     colFilters    = {};
-    sortState     = { col:'created_timestamp', dir:'desc' };
+    sortState     = { col: _DEFAULT_SORT.col, dir: _DEFAULT_SORT.dir };
 
     // Sync activeHeaderTabId from config
     var newHeader = TAB_UTILS.getHeaderTab(tabId);
@@ -749,7 +815,7 @@
     selectedRowId = null;
     currentPage   = 1;
     colFilters    = {};
-    sortState     = { col:'created_timestamp', dir:'desc' };
+    sortState     = { col: _DEFAULT_SORT.col, dir: _DEFAULT_SORT.dir };
 
     document.querySelectorAll('.nestedtab').forEach(function (b) {
       var on = b.dataset.nested === subId;
@@ -772,7 +838,7 @@
     if (labelEl) labelEl.textContent = ctx ? ctx.node.label.toUpperCase() : (tab ? tab.label : '');
 
     var activeRows  = getActiveRows();
-    var activeCount = activeRows.filter(function (r) { return !r.closed_timestamp; }).length;
+    var activeCount = countActiveRows(activeRows);
 
     var countEl = $('activeTabCount');  if (countEl) countEl.textContent = activeCount + ' active';
     var badgeEl = $('activeBadge');     if (badgeEl) badgeEl.textContent = activeCount + ' ACTIVE';
@@ -1323,11 +1389,30 @@
 
   function _renderSheetRow(groupId, mapping, rowIndex) {
     var prefix = 'sm_' + groupId + '_' + rowIndex;
+    // Resolve Sheet ID: prefer stored sheetId, else extract from url
+    var sheetIdVal = mapping.sheetId || _parseSheetUrl(mapping.url || '') || '';
     return '<div class="sheet-mapping-row" data-group="' + groupId + '" data-idx="' + rowIndex + '">' +
       '<div class="smr-fields">' +
-        '<input class="settings-input smr-name" id="' + prefix + '_name" type="text" placeholder="Display Name" value="' + esc(mapping.name||'') + '">' +
-        '<input class="settings-input smr-url" id="' + prefix + '_url" type="text" placeholder="Sheet URL or ID" value="' + esc(mapping.url||mapping.sheetId||'') + '">' +
-        '<input class="settings-input smr-gid" id="' + prefix + '_gid" type="text" placeholder="GID (optional)" value="' + esc(mapping.gid||'') + '" style="max-width:100px">' +
+        '<input class="settings-input smr-name" id="' + prefix + '_name" type="text"' +
+          ' placeholder="Display name (optional)" value="' + esc(mapping.name||'') + '"' +
+          ' style="max-width:130px">' +
+        '<div class="smr-url-col">' +
+          '<input class="settings-input smr-url" id="' + prefix + '_url" type="text"' +
+            ' placeholder="Paste full Google Sheets URL" value="' + esc(mapping.url||'') + '">' +
+          '<span class="smr-hint">Sheet ID is auto-extracted from the URL when you paste it.</span>' +
+          '<div class="smr-field-row">' +
+            '<div style="flex:1;min-width:100px">' +
+              '<input class="settings-input smr-sheetid" id="' + prefix + '_sheetid" type="text"' +
+                ' placeholder="Auto-filled from URL, or enter manually" value="' + esc(sheetIdVal) + '">' +
+              '<span class="smr-hint">Sheet ID — auto-filled above, or type to override.</span>' +
+            '</div>' +
+            '<div style="max-width:110px">' +
+              '<input class="settings-input smr-gid" id="' + prefix + '_gid" type="text"' +
+                ' placeholder="Tab GID (optional)" value="' + esc(mapping.gid||'') + '">' +
+              '<span class="smr-hint">Found in URL as gid=…</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
       '</div>' +
       '<div class="smr-actions">' +
         '<label class="smr-toggle"><input type="checkbox" class="smr-enabled"' + (mapping.enabled !== false ? ' checked' : '') + '> Active</label>' +
@@ -1364,6 +1449,30 @@
         _renderSheetRowsForGroup(groupId);
       });
     });
+
+    // Wire URL → SheetID auto-sync
+    container.querySelectorAll('.smr-url').forEach(function (urlInput) {
+      var row = urlInput.closest('.sheet-mapping-row');
+      if (!row) return;
+      var prefix = 'sm_' + groupId + '_' + row.dataset.idx;
+      var sheetIdInput = document.getElementById(prefix + '_sheetid');
+      if (!sheetIdInput) return;
+      urlInput.addEventListener('input', function () {
+        var extracted = _parseSheetUrl(urlInput.value.trim());
+        // Only auto-populate if user has not manually edited the sheetid field
+        if (!sheetIdInput.dataset.manualEdit) {
+          sheetIdInput.value = extracted || '';
+        }
+        // If URL is cleared, clear auto-fill unless manually set
+        if (!urlInput.value.trim() && !sheetIdInput.dataset.manualEdit) {
+          sheetIdInput.value = '';
+        }
+      });
+      sheetIdInput.addEventListener('input', function () {
+        // Flag that user has manually edited this field
+        sheetIdInput.dataset.manualEdit = sheetIdInput.value ? '1' : '';
+      });
+    });
   }
 
   function _readSheetMappingsFromUI() {
@@ -1375,16 +1484,21 @@
       rows.forEach(function (row) {
         var idx = parseInt(row.dataset.idx, 10);
         var prefix = 'sm_' + groupId + '_' + idx;
-        var nameEl    = $(prefix + '_name');
-        var urlEl     = $(prefix + '_url');
-        var gidEl     = $(prefix + '_gid');
-        var enabledEl = row.querySelector('.smr-enabled');
+        var nameEl      = $(prefix + '_name');
+        var urlEl       = $(prefix + '_url');
+        var sheetIdEl   = $(prefix + '_sheetid');
+        var gidEl       = $(prefix + '_gid');
+        var enabledEl   = row.querySelector('.smr-enabled');
+        var urlVal      = urlEl      ? urlEl.value.trim()      : '';
+        var sheetIdVal  = sheetIdEl  ? sheetIdEl.value.trim()  : '';
+        // Fallback: extract from URL if sheetid field is empty
+        if (!sheetIdVal) sheetIdVal = _parseSheetUrl(urlVal);
         _sheetMappings[groupId].push({
-          name:    nameEl    ? nameEl.value.trim()    : '',
-          url:     urlEl     ? urlEl.value.trim()     : '',
-          sheetId: urlEl     ? _parseSheetUrl(urlEl.value.trim()) : '',
-          gid:     gidEl     ? gidEl.value.trim()     : '',
-          enabled: enabledEl ? enabledEl.checked      : true
+          name:    nameEl    ? nameEl.value.trim() : '',
+          url:     urlVal,
+          sheetId: sheetIdVal,
+          gid:     gidEl     ? gidEl.value.trim()  : '',
+          enabled: enabledEl ? enabledEl.checked   : true
         });
       });
     });
