@@ -1,0 +1,67 @@
+Here is the token-optimized prompt you can copy and paste directly into Claude. It is dense, strips out conversational filler, uses standard Agile formatting, and provides the exact context Claude needs to start writing the Apps Script, AppSheet, and API integration code.
+
+***
+
+```markdown
+# SYSTEM ROLE
+You are an Expert Google Workspace Developer & Cloud Architect. Your task is to design and write the code for a unified reporting ecosystem using Google Apps Script, AppSheet, and an LLM API. 
+
+# CONTEXT & PROBLEM STATEMENT
+The IEM Operations (GSM) team currently uses fragmented tools: TaskFlow for active queues and Plx Dashboards for historical SLOs. 
+Solve these 6 specific pain points:
+1. No active tickets in historical views.
+2. Manual MBR (Monthly Business Review) slide creation; lacks LLM automation.
+3. Missing "Vector IDs" (stored in a separate DB).
+4. Bug IDs are plain text; lack hyperlinks.
+5. No native mobile app for on-call users.
+6. No single source of truth (fragmented UI).
+
+# TARGET ARCHITECTURE
+- **Backend:** Google Apps Script (.gs) to aggregate APIs (TaskFlow/Buganizer, Plx/F1, Vector ID DB).
+- **Web Frontend:** Apps Script HTML/JS Web App (Single Source of Truth).
+- **Mobile:** AppSheet Native App (connected to a Google Sheet synced by the backend).
+- **MBR Automation:** Apps Script calling an LLM API, using `SlidesApp` to inject insights into a standard Google Slides template.
+
+# USER STORIES
+- **US1:** As an Operator, I want a single web dashboard merging active tickets and historical SLOs so I stop context switching.
+- **US2:** As an Operator, I want all Bug IDs rendered as clickable links (`http://b/<bug_id>`) for fast navigation.
+- **US3:** As an Operator, I want Vector IDs joined to the main ticket data from the external DB.
+- **US4:** As an On-Call Manager, I want a native mobile app to view active P0s and SLO metrics on my phone.
+- **US5:** As a Lead, I want a "Generate MBR" button that feeds monthly data to an LLM and auto-populates a Google Slides template.
+
+# TECHNICAL REQUIREMENTS
+1. **Data Aggregation:** Join Buganizer/TaskFlow JSON data, Plx SQL data, and Vector ID data using `Bug_ID` as the primary key.
+2. **Data Sync:** Export merged data to a Google Sheet (AppSheet data source) via a Time-Driven Trigger.
+3. **Web UI:** Material Design HTML table. Inject `<a href="http://b/ID">` tags into the Bug ID column.
+4. **LLM MBR Integration:** Fetch aggregated monthly stats -> POST to LLM API (prompt: "Summarize SLO misses and outliers") -> `SlidesApp.openById(templateId)` -> Replace `{{Insights}}`, `{{SLO_Percent}}` tags.
+
+# USER FLOW
+1. **Daily Web Flow:** User opens Web App -> Script fetches 3 APIs -> Joins data -> Renders unified table with hyperlinks.
+2. **Daily Mobile Flow:** User opens AppSheet App -> Views natively rendered tables (synced every 5 mins to Sheets).
+3. **Monthly MBR Flow:** User clicks "Generate MBR" -> Script compiles month data -> LLM summarizes -> SlidesApp builds deck -> UI returns Slide URL.
+
+# TASK LIST & ACCEPTANCE CRITERIA (AC)
+
+**Task 1: Backend Data Aggregator (Apps Script)**
+- *AC1:* Fetch functions created for TaskFlow, Plx, and Vector DB.
+- *AC2:* Data is merged on `Bug_ID`.
+- *AC3:* Output JSON contains Active Tickets, History, and Vector IDs.
+
+**Task 2: AppSheet Sync & Mobile Setup**
+- *AC1:* Apps Script writes merged data to a master Google Sheet every 5 mins.
+- *AC2:* AppSheet configuration maps to the Sheet with "Active P0s" and "SLO Trends" views.
+
+**Task 3: Web UI Construction**
+- *AC1:* HTML/JS renders the merged JSON.
+- *AC2:* Bug IDs are strictly formatted as `target="_blank"` hyperlinks.
+
+**Task 4: LLM to Google Slides Pipeline**
+- *AC1:* Script successfully POSTs data to the LLM API and parses the response.
+- *AC2:* Script duplicates the Master Slide Template.
+- *AC3:* `replaceAllText` successfully injects LLM text into the new deck.
+
+# OUTPUT REQUESTED FROM CLAUDE
+1. Write the Google Apps Script backend (`Code.gs`) covering Task 1, Task 2 (Sheet Sync), and Task 4 (LLM/Slides).
+2. Write the Frontend (`Index.html`) for Task 3.
+3. Provide instructions on setting up the AppSheet connected to the synced Google Sheet.
+```
