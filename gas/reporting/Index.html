@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IEM Unified Reporting</title>
+
+  <!-- ── Material Design 3 tokens via Google Fonts (icons + typography) ── -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600&family=Google+Sans+Mono&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
+
+  <style>
+    /* ── MD3 Design Tokens ─────────────────────────────────────────────── */
+    :root {
+      --md-sys-color-background:        #0f1117;
+      --md-sys-color-surface:           #1a1d27;
+      --md-sys-color-surface-container: #22263a;
+      --md-sys-color-surface-variant:   #2c3147;
+      --md-sys-color-on-surface:        #e2e5f0;
+      --md-sys-color-on-surface-variant:#9ba3c2;
+      --md-sys-color-primary:           #7c9ef5;
+      --md-sys-color-on-primary:        #0d1e52;
+      --md-sys-color-primary-container: #1e3070;
+      --md-sys-color-error:             #f28b82;
+      --md-sys-color-outline:           #3a3f5c;
+      --md-sys-color-outline-variant:   #2a2f48;
+
+      --md-ref-palette-green:           #34a853;
+      --md-ref-palette-orange:          #fbbc05;
+      --md-ref-palette-red:             #ea4335;
+      --md-ref-palette-yellow:          #f9ab00;
+
+      --md-elevation-1: 0 1px 3px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.30);
+      --md-elevation-2: 0 3px 6px rgba(0,0,0,.45), 0 2px 4px rgba(0,0,0,.30);
+
+      --radius-s:  8px;
+      --radius-m: 12px;
+      --radius-l: 16px;
+
+      --font-body:  'Google Sans', system-ui, sans-serif;
+      --font-mono:  'Google Sans Mono', monospace;
+      --font-size-label:  0.72rem;
+      --font-size-body:   0.85rem;
+      --font-size-title:  1.1rem;
+    }
+
+    /* ── Reset & Base ───────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: var(--font-body);
+      font-size: var(--font-size-body);
+      background: var(--md-sys-color-background);
+      color: var(--md-sys-color-on-surface);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--md-sys-color-primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Top App Bar ────────────────────────────────────────────────────── */
+    .app-bar {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 24px;
+      height: 64px;
+      background: var(--md-sys-color-surface);
+      border-bottom: 1px solid var(--md-sys-color-outline-variant);
+      box-shadow: var(--md-elevation-1);
+    }
+    .app-bar-title {
+      flex: 1;
+      font-size: var(--font-size-title);
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--md-sys-color-on-surface);
+    }
+    .app-bar-title span {
+      color: var(--md-sys-color-primary);
+    }
+
+    /* ── MD3 Filled Button ──────────────────────────────────────────────── */
+    .btn-filled {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 0 20px; height: 40px; border-radius: 20px;
+      border: none; cursor: pointer;
+      font-family: var(--font-body); font-size: var(--font-size-body);
+      font-weight: 600; letter-spacing: 0.01em;
+      background: var(--md-sys-color-primary);
+      color: var(--md-sys-color-on-primary);
+      transition: opacity .15s, box-shadow .15s;
+    }
+    .btn-filled:hover { opacity: .92; box-shadow: var(--md-elevation-2); }
+    .btn-filled:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-filled .material-icons-round { font-size: 18px; }
+
+    /* ── Status Bar ─────────────────────────────────────────────────────── */
+    .status-bar {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 10px 24px;
+      background: var(--md-sys-color-surface-container);
+      border-bottom: 1px solid var(--md-sys-color-outline-variant);
+      font-size: var(--font-size-label);
+    }
+    .status-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 20px;
+      background: var(--md-sys-color-surface-variant);
+      color: var(--md-sys-color-on-surface-variant);
+      font-size: var(--font-size-label);
+    }
+    .status-chip .material-icons-round { font-size: 14px; }
+    .pill {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 22px; height: 22px; padding: 0 7px; border-radius: 11px;
+      font-size: 0.68rem; font-weight: 700;
+      background: var(--md-sys-color-primary);
+      color: var(--md-sys-color-on-primary);
+    }
+    .pill-error { background: var(--md-ref-palette-red); color: #fff; }
+
+    /* ── Toolbar (filter + column info) ────────────────────────────────── */
+    .toolbar {
+      display: flex; align-items: center; gap: 12px; padding: 12px 24px;
+    }
+    .search-box {
+      flex: 0 0 280px;
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 12px; height: 38px; border-radius: var(--radius-s);
+      background: var(--md-sys-color-surface-container);
+      border: 1px solid var(--md-sys-color-outline);
+    }
+    .search-box input {
+      flex: 1; border: none; outline: none; background: transparent;
+      color: var(--md-sys-color-on-surface); font-family: var(--font-body);
+      font-size: var(--font-size-body);
+    }
+    .search-box .material-icons-round {
+      color: var(--md-sys-color-on-surface-variant); font-size: 18px;
+    }
+    .row-count { color: var(--md-sys-color-on-surface-variant); font-size: var(--font-size-label); margin-left: auto; }
+
+    /* ── Table Container ────────────────────────────────────────────────── */
+    .table-wrap {
+      margin: 0 24px 24px;
+      border-radius: var(--radius-m);
+      border: 1px solid var(--md-sys-color-outline-variant);
+      overflow: auto;
+      box-shadow: var(--md-elevation-1);
+    }
+    table {
+      width: 100%; border-collapse: collapse;
+      table-layout: fixed;
+      font-size: var(--font-size-body);
+    }
+    thead { position: sticky; top: 0; z-index: 10; }
+    thead tr { background: var(--md-sys-color-surface-variant); }
+    th {
+      padding: 12px 14px; text-align: left;
+      font-size: var(--font-size-label); font-weight: 600;
+      color: var(--md-sys-color-on-surface-variant);
+      letter-spacing: 0.04em; text-transform: uppercase;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      border-bottom: 1px solid var(--md-sys-color-outline);
+      cursor: pointer; user-select: none;
+    }
+    th:hover { color: var(--md-sys-color-on-surface); }
+    th .sort-icon { font-size: 14px; vertical-align: middle; opacity: .5; }
+    th.sorted .sort-icon { opacity: 1; color: var(--md-sys-color-primary); }
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--md-sys-color-outline-variant);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    tbody tr { background: var(--md-sys-color-surface); transition: background .1s; }
+    tbody tr:hover { background: var(--md-sys-color-surface-container); }
+    tbody tr:last-child td { border-bottom: none; }
+
+    /* ── Column widths ─────────────────────────────────────────────────── */
+    col.col-bug_id          { width: 90px; }
+    col.col-vector_id       { width: 90px; }
+    col.col-priority        { width: 60px; }
+    col.col-status          { width: 110px; }
+    col.col-owner           { width: 100px; }
+    col.col-customer_name   { width: 130px; }
+    col.col-escalation_type { width: 110px; }
+    col.col-revenue_at_risk { width: 90px; }
+    col.col-slo_percent     { width: 72px; }
+    col.col-region          { width: 70px; }
+    col.col-created_at      { width: 110px; }
+    col.col-slo_breach      { width: 72px; }
+    col.col-source          { width: 80px; }
+    /* title fills remaining space — no explicit width */
+
+    /* ── Priority Badges ────────────────────────────────────────────────── */
+    .badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 2px 8px; border-radius: 4px;
+      font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em;
+    }
+    .badge-p0 { background: rgba(234,67,53,.18); color: #f28b82; }
+    .badge-p1 { background: rgba(251,188, 5,.18); color: #fbbc05; }
+    .badge-p2 { background: rgba(52,168,83,.18);  color: #57bb8a; }
+    .badge-p3 { background: rgba(155,163,194,.15); color: #9ba3c2; }
+
+    /* ── Status Dot ─────────────────────────────────────────────────────── */
+    .status-cell { display: inline-flex; align-items: center; gap: 6px; }
+    .status-dot  { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot-active   { background: #34a853; box-shadow: 0 0 6px #34a85388; }
+    .dot-closed   { background: #5f6368; }
+    .dot-unknown  { background: #fbbc05; }
+
+    /* ── SLO Percent colouring ──────────────────────────────────────────── */
+    .slo-green  { color: #34a853; font-weight: 600; }
+    .slo-yellow { color: #fbbc05; font-weight: 600; }
+    .slo-red    { color: #f28b82; font-weight: 600; }
+
+    /* ── SLO breach badge ───────────────────────────────────────────────── */
+    .slo-breach-yes { color: #f28b82; font-weight: 600; }
+    .slo-breach-no  { color: var(--md-sys-color-on-surface-variant); }
+
+    /* ── Source chip ────────────────────────────────────────────────────── */
+    .src-chip {
+      font-size: 0.65rem; font-family: var(--font-mono);
+      padding: 1px 6px; border-radius: 3px;
+      background: var(--md-sys-color-surface-variant);
+      color: var(--md-sys-color-on-surface-variant);
+    }
+    .src-chip.unmatched { background: rgba(234,67,53,.15); color: #f28b82; }
+
+    /* ── Loading / Error states ─────────────────────────────────────────── */
+    .state-panel {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 16px;
+      min-height: 300px; color: var(--md-sys-color-on-surface-variant);
+    }
+    .spinner {
+      width: 40px; height: 40px; border-radius: 50%;
+      border: 3px solid var(--md-sys-color-outline);
+      border-top-color: var(--md-sys-color-primary);
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Toast notification ─────────────────────────────────────────────── */
+    .toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      display: none; align-items: center; gap: 12px;
+      padding: 14px 20px; border-radius: var(--radius-m);
+      background: var(--md-sys-color-surface-variant);
+      color: var(--md-sys-color-on-surface);
+      box-shadow: var(--md-elevation-2);
+      font-size: var(--font-size-body); font-weight: 500;
+      z-index: 9999; max-width: 480px;
+    }
+    .toast.visible { display: flex; }
+    .toast.toast-error { border-left: 3px solid var(--md-ref-palette-red); }
+    .toast.toast-success { border-left: 3px solid var(--md-ref-palette-green); }
+    .toast a { color: var(--md-sys-color-primary); margin-left: 4px; }
+
+    /* ── Empty state ────────────────────────────────────────────────────── */
+    .empty-row td {
+      text-align: center; padding: 48px 16px;
+      color: var(--md-sys-color-on-surface-variant);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Top App Bar ──────────────────────────────────────────────────────── -->
+  <header class="app-bar">
+    <span class="material-icons-round" style="color:var(--md-sys-color-primary)">monitoring</span>
+    <h1 class="app-bar-title">IEM <span>Unified Reporting</span></h1>
+
+    <button class="btn-filled" id="mbrBtn" onclick="triggerMBR()">
+      <span class="material-icons-round">slideshow</span>
+      Generate MBR
+    </button>
+  </header>
+
+  <!-- ── Status Bar ───────────────────────────────────────────────────────── -->
+  <div class="status-bar">
+    <div class="status-chip">
+      <span class="material-icons-round">sync</span>
+      <span id="lastSynced">Loading…</span>
+    </div>
+    <div class="status-chip">
+      <span class="material-icons-round">bug_report</span>
+      <span id="activeCount">—</span>&nbsp;active incidents
+    </div>
+    <div class="status-chip">
+      <span class="material-icons-round">priority_high</span>
+      <span id="p0Count">—</span>&nbsp;P0s
+    </div>
+  </div>
+
+  <!-- ── Toolbar ──────────────────────────────────────────────────────────── -->
+  <div class="toolbar">
+    <div class="search-box">
+      <span class="material-icons-round">search</span>
+      <input id="filterInput" type="text" placeholder="Filter by bug ID, title, customer…"
+             autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="row-count" id="rowCount"></div>
+  </div>
+
+  <!-- ── Main content ─────────────────────────────────────────────────────── -->
+  <main>
+    <!-- Loading state -->
+    <div id="loadingState" class="state-panel">
+      <div class="spinner"></div>
+      <p>Fetching incident data…</p>
+    </div>
+
+    <!-- Error state -->
+    <div id="errorState" class="state-panel" style="display:none">
+      <span class="material-icons-round" style="font-size:48px;color:var(--md-ref-palette-red)">error_outline</span>
+      <p id="errorMsg">An error occurred.</p>
+    </div>
+
+    <!-- Table -->
+    <div class="table-wrap" id="tableWrap" style="display:none">
+      <table id="reportTable" aria-label="Incident report">
+        <colgroup id="tableColgroup"></colgroup>
+        <thead><tr id="tableHead"></tr></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- ── Toast ────────────────────────────────────────────────────────────── -->
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    /* ── Column definitions ───────────────────────────────────────────────── */
+    var COLUMNS = [
+      { key: 'bug_id',          label: 'Bug ID',         render: renderBugId },
+      { key: 'vector_id',       label: 'Vector ID',      render: renderText },
+      { key: 'title',           label: 'Title',          render: renderText },
+      { key: 'priority',        label: 'P',              render: renderPriority },
+      { key: 'status',          label: 'Status',         render: renderStatus },
+      { key: 'owner',           label: 'Owner',          render: renderText },
+      { key: 'customer_name',   label: 'Customer',       render: renderText },
+      { key: 'escalation_type', label: 'Esc. Type',      render: renderText },
+      { key: 'revenue_at_risk', label: 'Rev @ Risk',     render: renderRevenue },
+      { key: 'slo_percent',     label: 'SLO %',          render: renderSlo },
+      { key: 'region',          label: 'Region',         render: renderText },
+      { key: 'created_at',      label: 'Created',        render: renderDate },
+      { key: 'slo_breach',      label: 'SLO Breach',     render: renderSloBreach },
+      { key: '_source',         label: 'Source',         render: renderSource }
+    ];
+
+    /* ── App state ────────────────────────────────────────────────────────── */
+    var _allRows    = [];
+    var _sortCol    = 'priority';
+    var _sortDir    = 'asc';
+    var _filterText = '';
+    var _filterTimer = null;
+
+    /* ── Bootstrap ────────────────────────────────────────────────────────── */
+    window.addEventListener('DOMContentLoaded', function () {
+      buildTable();
+      document.getElementById('filterInput').addEventListener('input', onFilterInput);
+      loadData();
+    });
+
+    function loadData() {
+      // google.script.run is available when running as a GAS Web App.
+      // In standalone browser preview, falls back to mock data.
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler(onDataLoaded)
+          .withFailureHandler(onDataError)
+          .getReportingData();
+      } else {
+        // ── Local preview mock ─────────────────────────────────────────────
+        onDataLoaded({
+          ok: true,
+          rows: _mockRows(),
+          lastSynced: new Date().toISOString(),
+          schema: COLUMNS.map(function (c) { return c.key; })
+        });
+      }
+    }
+
+    /* ── Table construction ───────────────────────────────────────────────── */
+    function buildTable() {
+      var cg   = document.getElementById('tableColgroup');
+      var head = document.getElementById('tableHead');
+      cg.innerHTML = COLUMNS.map(function (c) {
+        return '<col class="col-' + c.key.replace('_', '') + '">';
+      }).join('');
+      head.innerHTML = COLUMNS.map(function (c, i) {
+        return '<th data-col="' + c.key + '" onclick="sortBy(\'' + c.key + '\')">'
+          + c.label
+          + ' <span class="material-icons-round sort-icon" id="si-' + i + '">unfold_more</span>'
+          + '</th>';
+      }).join('');
+    }
+
+    /* ── Data handlers ────────────────────────────────────────────────────── */
+    function onDataLoaded(result) {
+      document.getElementById('loadingState').style.display = 'none';
+      if (!result || !result.ok) {
+        showError(result && result.error ? result.error : 'Unexpected response from server.');
+        return;
+      }
+      _allRows = result.rows || [];
+      updateStatusBar(result);
+      document.getElementById('tableWrap').style.display = '';
+      render();
+    }
+
+    function onDataError(err) {
+      showError(err && err.message ? err.message : String(err));
+    }
+
+    function showError(msg) {
+      document.getElementById('loadingState').style.display = 'none';
+      document.getElementById('errorState').style.display   = '';
+      document.getElementById('errorMsg').textContent = msg;
+    }
+
+    /* ── Status bar ───────────────────────────────────────────────────────── */
+    function updateStatusBar(result) {
+      var synced = result.lastSynced || '';
+      if (synced) {
+        try {
+          var d = new Date(synced);
+          synced = d.toLocaleString('en-US', {
+            month: 'short', day: 'numeric',
+            hour: '2-digit', minute: '2-digit', timeZoneName: 'short'
+          });
+        } catch (_) { /* use raw string */ }
+      }
+      document.getElementById('lastSynced').textContent = synced || '—';
+
+      var active = _allRows.filter(function (r) {
+        return r.status !== 'Closed' && r.status !== 'Resolved';
+      });
+      var p0s = active.filter(function (r) { return r.priority === 'P0'; });
+      document.getElementById('activeCount').textContent = active.length;
+      document.getElementById('p0Count').textContent     = p0s.length;
+    }
+
+    /* ── Render ───────────────────────────────────────────────────────────── */
+    function render() {
+      var rows = applyFilterAndSort();
+      var tbody = document.getElementById('tableBody');
+      document.getElementById('rowCount').textContent =
+        rows.length + ' of ' + _allRows.length + ' row' + (_allRows.length !== 1 ? 's' : '');
+
+      if (!rows.length) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="' + COLUMNS.length + '">'
+          + (_filterText ? 'No rows match your filter.' : 'No data available.')
+          + '</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = rows.map(function (r) {
+        return '<tr>' + COLUMNS.map(function (col) {
+          return '<td title="' + _esc(String(r[col.key] || '')) + '">'
+            + col.render(r[col.key], r)
+            + '</td>';
+        }).join('') + '</tr>';
+      }).join('');
+    }
+
+    /* ── Filter + Sort ────────────────────────────────────────────────────── */
+    function applyFilterAndSort() {
+      var q = _filterText.toLowerCase();
+      var rows = q
+        ? _allRows.filter(function (r) {
+            return Object.values(r).some(function (v) {
+              return String(v).toLowerCase().indexOf(q) !== -1;
+            });
+          })
+        : _allRows.slice();
+
+      rows.sort(function (a, b) {
+        var av = _sortVal(a[_sortCol]);
+        var bv = _sortVal(b[_sortCol]);
+        if (av < bv) return _sortDir === 'asc' ? -1 :  1;
+        if (av > bv) return _sortDir === 'asc' ?  1 : -1;
+        return 0;
+      });
+      return rows;
+    }
+
+    function _sortVal(v) {
+      if (v === undefined || v === null || v === '') return '￿';
+      var n = parseFloat(v);
+      if (!isNaN(n)) return n;
+      // Priority sort: P0 < P1 < P2 < P3 < other
+      var pm = { P0: 0, P1: 1, P2: 2, P3: 3 };
+      if (pm[v] !== undefined) return pm[v];
+      return String(v).toLowerCase();
+    }
+
+    window.sortBy = function (col) {
+      if (_sortCol === col) {
+        _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        _sortCol = col;
+        _sortDir = 'asc';
+      }
+      // Update sort icons
+      COLUMNS.forEach(function (c, i) {
+        var el = document.getElementById('si-' + i);
+        var th = el && el.parentElement;
+        if (!el) return;
+        if (c.key === _sortCol) {
+          el.textContent = _sortDir === 'asc' ? 'arrow_upward' : 'arrow_downward';
+          if (th) th.classList.add('sorted');
+        } else {
+          el.textContent = 'unfold_more';
+          if (th) th.classList.remove('sorted');
+        }
+      });
+      render();
+    };
+
+    function onFilterInput(e) {
+      clearTimeout(_filterTimer);
+      _filterTimer = setTimeout(function () {
+        _filterText = e.target.value.trim();
+        render();
+      }, 250);
+    }
+
+    /* ── Cell renderers ───────────────────────────────────────────────────── */
+    function renderText(v) {
+      return _esc(String(v || ''));
+    }
+
+    function renderBugId(v) {
+      if (!v) return '—';
+      var id = String(v);
+      return '<a href="http://b/' + _esc(id) + '" target="_blank" rel="noopener">'
+        + _esc(id) + '</a>';
+    }
+
+    function renderPriority(v) {
+      if (!v) return '—';
+      var p = String(v).toUpperCase();
+      var cls = p === 'P0' ? 'badge-p0'
+              : p === 'P1' ? 'badge-p1'
+              : p === 'P2' ? 'badge-p2'
+              : 'badge-p3';
+      return '<span class="badge ' + cls + '">' + _esc(p) + '</span>';
+    }
+
+    function renderStatus(v) {
+      if (!v) return '—';
+      var s   = String(v);
+      var low = s.toLowerCase();
+      var dotCls = low === 'closed' || low === 'resolved' ? 'dot-closed'
+                 : low === 'in progress' || low === 'investigating' || low === 'open' ? 'dot-active'
+                 : 'dot-unknown';
+      return '<span class="status-cell"><span class="status-dot ' + dotCls + '"></span>'
+        + _esc(s) + '</span>';
+    }
+
+    function renderRevenue(v) {
+      if (v === '' || v === null || v === undefined) return '—';
+      var n = parseFloat(v);
+      if (isNaN(n)) return '—';
+      if (n >= 1e6)  return '$' + (Math.round(n / 1e5) / 10).toFixed(1) + 'M';
+      if (n >= 1e3)  return '$' + Math.round(n / 1e3) + 'K';
+      return '$' + Math.round(n);
+    }
+
+    function renderSlo(v) {
+      if (v === '' || v === null || v === undefined) return '—';
+      var n = parseFloat(v);
+      if (isNaN(n)) return _esc(String(v));
+      var cls = n >= 99.9 ? 'slo-green' : n >= 99 ? 'slo-yellow' : 'slo-red';
+      return '<span class="' + cls + '">' + n.toFixed(2) + '%</span>';
+    }
+
+    function renderSloBreach(v) {
+      var s   = String(v || '').toLowerCase();
+      var yes = s === 'yes' || s === 'true' || s === '1';
+      return yes
+        ? '<span class="slo-breach-yes">Yes</span>'
+        : '<span class="slo-breach-no">No</span>';
+    }
+
+    function renderDate(v) {
+      if (!v) return '—';
+      try {
+        var d = new Date(v);
+        if (isNaN(d.getTime())) return _esc(String(v));
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+      } catch (_) { return _esc(String(v)); }
+    }
+
+    function renderSource(v) {
+      if (!v) return '—';
+      var s   = String(v);
+      var cls = s === 'unmatched' ? 'src-chip unmatched' : 'src-chip';
+      return '<span class="' + cls + '">' + _esc(s) + '</span>';
+    }
+
+    /* ── MBR trigger ──────────────────────────────────────────────────────── */
+    window.triggerMBR = function () {
+      var btn = document.getElementById('mbrBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="material-icons-round" style="animation:spin .8s linear infinite">sync</span> Generating…';
+
+      if (typeof google !== 'undefined' && google.script && google.script.run) {
+        google.script.run
+          .withSuccessHandler(onMbrDone)
+          .withFailureHandler(onMbrError)
+          .generateMBR();
+      } else {
+        setTimeout(function () {
+          onMbrDone({ ok: true, slidesUrl: 'https://docs.google.com/presentation/d/DEMO' });
+        }, 1500);
+      }
+    };
+
+    function onMbrDone(result) {
+      resetMbrBtn();
+      if (!result || !result.ok) {
+        showToast('MBR generation failed: ' + (result && result.error ? result.error : 'Unknown error'), 'error');
+        return;
+      }
+      showToast(
+        'MBR slides updated ✓ — <a href="' + result.slidesUrl + '" target="_blank" rel="noopener">Open Slides</a>',
+        'success'
+      );
+    }
+
+    function onMbrError(err) {
+      resetMbrBtn();
+      showToast('Error: ' + (err && err.message ? err.message : String(err)), 'error');
+    }
+
+    function resetMbrBtn() {
+      var btn = document.getElementById('mbrBtn');
+      btn.disabled = false;
+      btn.innerHTML = '<span class="material-icons-round">slideshow</span> Generate MBR';
+    }
+
+    /* ── Toast ────────────────────────────────────────────────────────────── */
+    var _toastTimer;
+    function showToast(html, type) {
+      var el  = document.getElementById('toast');
+      el.innerHTML = html;
+      el.className = 'toast visible toast-' + (type || 'success');
+      clearTimeout(_toastTimer);
+      _toastTimer = setTimeout(function () { el.className = 'toast'; }, 6000);
+    }
+
+    /* ── HTML escape ──────────────────────────────────────────────────────── */
+    function _esc(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    /* ── Local preview mock data ──────────────────────────────────────────── */
+    function _mockRows() {
+      var base = [
+        { bug_id:'123456', vector_id:'IEM-0921', title:'MCS SF PROD - Auth failure P0', priority:'P0', status:'In Progress', owner:'msmith', customer_name:'Acme Corp', escalation_type:'MCS', revenue_at_risk:1500000, slo_percent:98.72, region:'US-WEST', created_at:'2025-05-01T08:00:00Z', slo_breach:'Yes', _source:'taskflow' },
+        { bug_id:'234567', vector_id:'IEM-0922', title:'CUF Billing API timeout',        priority:'P1', status:'Investigating', owner:'ljones', customer_name:'GlobalTech', escalation_type:'CUF', revenue_at_risk:320000, slo_percent:99.51, region:'EU',      created_at:'2025-05-02T11:30:00Z', slo_breach:'No',  _source:'taskflow' },
+        { bug_id:'345678', vector_id:'',         title:'EXEC Escalation - VIP customer', priority:'P0', status:'In Progress', owner:'aking',  customer_name:'MegaStar', escalation_type:'EXEC', revenue_at_risk:4200000, slo_percent:97.10, region:'APAC',    created_at:'2025-05-03T09:15:00Z', slo_breach:'Yes', _source:'taskflow' },
+        { bug_id:'456789', vector_id:'IEM-0924', title:'Social Care spike - EMEA',       priority:'P2', status:'Monitoring',  owner:'bwang',  customer_name:'StartUp Inc', escalation_type:'Social', revenue_at_risk:0, slo_percent:99.92, region:'EU',  created_at:'2025-05-04T14:00:00Z', slo_breach:'No',  _source:'taskflow' },
+        { bug_id:'567890', vector_id:'IEM-0925', title:'Plx reporting lag — gUP',        priority:'P1', status:'Open',        owner:'cperez', customer_name:'BankCo',   escalation_type:'CUF', revenue_at_risk:870000, slo_percent:99.05, region:'US-EAST', created_at:'2025-05-05T07:45:00Z', slo_breach:'No',  _source:'unmatched' },
+        { bug_id:'678901', vector_id:'',         title:'Vector DB mismatch detected',     priority:'P3', status:'Closed',      owner:'tlee',   customer_name:'',         escalation_type:'',   revenue_at_risk:0, slo_percent:100, region:'US-WEST',         created_at:'2025-04-28T16:00:00Z', slo_breach:'No',  _source:'vector' }
+      ];
+      // Convert numeric revenue_at_risk / slo_percent to strings (as they come from GAS)
+      return base.map(function (r) {
+        var out = {};
+        Object.keys(r).forEach(function (k) { out[k] = String(r[k]); });
+        return out;
+      });
+    }
+
+  }());
+  </script>
+</body>
+</html>
